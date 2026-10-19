@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Xeloria
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: 27.2.12479018
+  CMAKE_VERSION: 3.22.1
+
+jobs:
+  checks:
+    name: Engine & module tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: License headers
+        run: python scripts/add-spdx.py --check
+      - name: Config patcher (bash)
+        run: bash tests/test-patch.sh
+      - name: Config patcher (busybox)
+        run: |
+          sudo apt-get install -y --no-install-recommends busybox
+          bash tests/test-patch.sh "busybox sh"
+      - name: Engine host tests (ASan/UBSan)
+        run: bash tests/run-engine-tests.sh
+
+  build:
+    name: Build module & app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK and CMake
+        run: sdkmanager --install "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}" > /dev/null
+      - name: Build engine
+        run: ANDROID_SDK="$ANDROID_HOME" bash scripts/build-engine.sh
+      - name: Package module
+        run: bash scripts/build-module.sh
+      - name: App unit tests and release build
+        working-directory: app
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resonancefx-${{ github.sha }}
+          path: |
+            out/ResonanceFX-*.zip
+            app/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

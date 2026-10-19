@@ -1,0 +1,43 @@
+name: Bug report
+description: Something doesn't work, sounds wrong or the engine doesn't load
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Samsung Galaxy S24 Ultra, Android 15 (One UI 7)
+    validations:
+      required: true
+  - type: dropdown
+    id: root
+    attributes:
+      label: Root manager
+      options: [Magisk, KernelSU, KernelSU Next, APatch, Other]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ResonanceFX version (module and app)
+      placeholder: module v2.0.0, app 2.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Status report
+      description: App → Status → Copy report, then paste here.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Module logs
+      description: Attach or paste the files from /data/adb/resonancefx/logs/ if the engine doesn't load.

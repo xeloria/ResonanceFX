@@ -1,0 +1,31 @@
+ResonanceFX
+Copyright (C) 2026 Xeloria
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. See LICENSE.
+
+What ships
+----------
+
+The engine (engine/src), the root module (module/) and the app (app/) are original ResonanceFX
+work, GPL-3.0-or-later. The DSP core in engine/src/core comes from Basilar, also by Xeloria and
+also GPL-3.0-or-later. See docs/LICENSING.md for how the engine was written and what it does
+and doesn't contain.
+
+Third-party data
+----------------
+
+Head-related impulse responses in engine/src/core/src/data/KemarHrir.cpp are derived from the
+MIT KEMAR measurements: W. G. Gardner and K. D. Martin, "HRTF Measurements of a KEMAR Dummy-Head
+Microphone", MIT Media Lab Perceptual Computing Technical Report #280, 1994. Free to use with
+this citation.
+
+Headphone profiles in app/app/src/main/assets/autoeq/profiles.json are generated from the
+AutoEq project (https://github.com/jaakkopasanen/AutoEq), Copyright (c) 2018-2022 Jaakko
+Pasanen, MIT License (reproduced in app/app/src/main/assets/autoeq/LICENSE and shown in the
+app under Settings > Open-source licenses). Measurements by their respective sources
+(oratory1990, crinacle, Rtings and others) as credited in AutoEq.
+
+The root module's installer conventions follow the Magisk module template (Zackptg5 and
+contributors); module/META-INF/com/google/android/update-binary is an original minimal stub.

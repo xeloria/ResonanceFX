@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<audio_effects_conf version="2.0" xmlns="http://schemas.android.com/audio/audio_effects_conf/v2_0">
+    <!-- <libraries> is mentioned in this comment and must not be used as an anchor -->
+    <libraries/>
+    <effects/>
+</audio_effects_conf>

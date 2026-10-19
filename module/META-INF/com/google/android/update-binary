@@ -1,0 +1,22 @@
+#!/sbin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Xeloria
+# Recovery-style entry point that hands installation to the root manager's own installer
+# (Magisk's util_functions.sh). KernelSU and APatch ignore this file and run customize.sh.
+umask 022
+OUTFD=$2
+ZIPFILE=$3
+ui_print() { echo "$1"; }
+
+mount /data 2>/dev/null
+if [ ! -f /data/adb/magisk/util_functions.sh ]; then
+    ui_print "! Install this zip from Magisk, KernelSU or APatch (Magisk 20.4+ required)."
+    exit 1
+fi
+. /data/adb/magisk/util_functions.sh
+if [ "$MAGISK_VER_CODE" -lt 20400 ]; then
+    ui_print "! Magisk 20.4 or newer is required."
+    exit 1
+fi
+install_module
+exit 0

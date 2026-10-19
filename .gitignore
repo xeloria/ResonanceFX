@@ -1,0 +1,21 @@
+# Build output
+build/
+out/
+app/build/
+app/*/build/
+.gradle/
+.kotlin/
+.cxx/
+
+# Local machine
+local.properties
+*.iml
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Signing keys never belong in the repository
+*.jks
+*.keystore
+keystore.properties

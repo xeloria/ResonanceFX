@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest an effect or an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe the effect or change and the problem it solves.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Examples, links, other apps that do it well.
