@@ -30,9 +30,14 @@ public:
     void set(const Settings& s);
     void process(float* left, float* right, int n);
     float gainReductionDb() const { return grDb_; }
+    /// Gain already applied before the engine (dB, <= 0): the system volume on outputs where
+    /// Android scales the mix before effects. Levels are judged on the programme itself, so the
+    /// volume knob doesn't move the threshold.
+    void setLevelOffsetDb(float db) { offsetDb_ = db; }
 
 private:
     double gainComputer(double xDb) const;
+    double offsetDb_ = 0.0;
     Settings s_;
     double fs_ = 48000.0;
     double aA_ = 0.0, aR_ = 0.0, y1_ = 0.0, yL_ = 0.0, makeup_ = 1.0;
@@ -41,25 +46,35 @@ private:
     float grDb_ = 0.0f;
 };
 
-/// Loudness normaliser: rides a slow gain so that the K-weighted momentary loudness
-/// approaches the target (EBU R128 / ITU-R BS.1770-4 measurement).  Gated below -50 LUFS
-/// so silence and fades are never pumped up.
+/// Loudness normaliser: rides a gain so that the K-weighted momentary loudness approaches the
+/// target (EBU R128 / ITU-R BS.1770-4 measurement).  Gated below -50 LUFS so silence and fades
+/// are never pumped up.  The first reading after a reset or a pause (300 ms of audio) sets the
+/// gain directly, so a new track is levelled at once; after that it follows smoothly.  By default
+/// it only lifts quiet programme (maxCutDb = 0); loud tracks are turned down only if allowed.
 class Agc {
 public:
     struct Settings {
-        float targetLufs = -16.0f, maxGainDb = 9.0f, speed = 0.5f;
+        float targetLufs = -14.0f, maxGainDb = 9.0f, maxCutDb = 0.0f, speed = 0.5f;
     };
     void prepare(double sampleRate);
+    /// Forgets everything: the next reading sets the gain from scratch.
     void reset();
     void set(const Settings& s) { s_ = s; }
+    /// Gain already applied before the engine (dB, <= 0): the system volume on outputs where
+    /// Android scales the mix before effects. Levels are judged on the programme itself, so the
+    /// volume knob doesn't move the threshold.
+    void setLevelOffsetDb(float db) { offsetDb_ = db; }
     void process(float* left, float* right, int n);
     float gainDb() const { return static_cast<float>(gainDb_); }
+    double momentaryLufs() const { return meter_.momentaryLufs(); }
 
 private:
     Settings s_;
     double fs_ = 48000.0;
     LoudnessMeter meter_;
-    double gainDb_ = 0.0;
+    double gainDb_ = 0.0, offsetDb_ = 0.0;
+    bool primed_ = false;  // gain is based on a real reading
+    int silentBlocks_ = 0;
     LinearRamp ramp_;
 };
 

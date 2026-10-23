@@ -12,6 +12,7 @@ import io.github.resonancefx.autoeq.AutoEqDatabase
 import io.github.resonancefx.model.AutoEqControl
 import io.github.resonancefx.model.BandsControl
 import io.github.resonancefx.model.GraphicEqControl
+import io.github.resonancefx.model.MeasureControl
 import io.github.resonancefx.model.Section
 import io.github.resonancefx.model.Catalog
 import io.github.resonancefx.model.Choice
@@ -87,7 +88,7 @@ class Applier(
             is FileControl -> applyFile(fx, control, settings.string(control.key))
             is AutoEqControl -> applyAutoEq(fx, settings)
             // Only ever part of composite sections, sent by Section.compose.
-            is GraphicEqControl, is BandsControl -> Unit
+            is GraphicEqControl, is BandsControl, is MeasureControl -> Unit
         }
     }
 

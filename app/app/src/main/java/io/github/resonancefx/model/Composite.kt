@@ -51,6 +51,38 @@ object Composite {
     fun formatGains(gains: FloatArray) = gains.joinToString(";") { String.format(Locale.ROOT, "%.1f", it) }
 
     /**
+     * A speaker measurement: the correction fitted to it (preamp + bands) and the measured
+     * response on [io.github.resonancefx.autoeq.Response.frequencies], normalised to 0 dB in the
+     * midrange. Stored as "preamp;lowHz;highHz|bands|r0,r1,...".
+     */
+    data class Measurement(
+        val preampDb: Float,
+        val bands: List<Band>,
+        val responseDb: List<Float>,
+        val lowHz: Float,
+        val highHz: Float,
+    )
+
+    fun parseMeasurement(value: String): Measurement? {
+        val parts = value.split('|')
+        if (parts.size != 3) return null
+        val head = parts[0].split(';').map { it.toFloatOrNull() ?: return null }
+        if (head.size != 3) return null
+        val response = parts[2].split(',').map { it.toFloatOrNull() ?: return null }
+        return Measurement(head[0].coerceIn(-24f, 0f), parseBands(parts[1]), response, head[1], head[2])
+    }
+
+    fun formatMeasurement(m: Measurement): String =
+        String.format(Locale.ROOT, "%.2f;%.0f;%.0f", m.preampDb, m.lowHz, m.highHz) + "|" + formatBands(m.bands) + "|" +
+            m.responseDb.joinToString(",") { String.format(Locale.ROOT, "%.1f", it) }
+
+    /** The measured correction as the engine's EQ payload (empty without a measurement). */
+    fun speakerCorrection(value: String): ByteArray {
+        val m = parseMeasurement(value) ?: return Codec.parametricEq(0f, emptyList())
+        return Codec.parametricEq(m.preampDb, m.bands.map { floatArrayOf(it.type.toFloat(), it.frequency, it.gainDb, it.q) })
+    }
+
+    /**
      * Multiband compressor from the simple controls: shared threshold and ratio, crossovers
      * spread over the spectrum, and the lowest band gentler so bass doesn't pump.
      */

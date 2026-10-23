@@ -8,14 +8,18 @@ modern Material You app.
 
 ## Highlights
 
-- **26 effect modules**: 10-band equalizer (56 presets), 15/31-band graphic EQ, parametric EQ
+- **28 effect modules**: 10-band equalizer (56 presets), 15/31-band graphic EQ, parametric EQ
   (up to 32 bands), AutoEQ (thousands of headphones), loudness compensation (ISO 226, follows
   the volume), multiband compressor, dynamic EQ, de-esser, vocals & ambience (centre
   extraction), spatial audio (MIT KEMAR HRTF, head tracking on Android 13+), convolver (impulse responses,
   auto-resampled to the live output rate), headphone correction (`.vdc` profiles), FET
   compressor, playback gain control, bass and clarity enhancers, field/differential surround,
   headphone surround, reverb, dynamic system (103 headphone profiles), tube simulator, analog
-  coloration, crossfeed, speaker optimization, output gain/balance/limiter.
+  coloration, crossfeed, output gain/balance/limiter.
+- **Made for speakers too**: speaker correction (phone, tablet, laptop, Bluetooth, car and TV
+  profiles), **measure your own speaker** with the phone's microphone and get a correction fitted
+  to it, speaker protection (an excursion limiter that holds back bass a small driver can't
+  play) and speaker widening (crosstalk cancellation for closely spaced speakers).
 - **Per-device profiles** that switch automatically for speaker, wired, every Bluetooth device
   and USB DAC; JSON presets with import/export.
 - **Live status**: see whether the engine is registered, attached and processing, with a
@@ -25,7 +29,8 @@ modern Material You app.
   x86, x86_64, 16 KB pages.
 - **Self-healing**: re-attaches after audioserver restarts and re-uploads impulse responses when
   the output sample rate changes.
-- **Private**: no ads, no analytics, no network permission.
+- **Private**: no ads, no analytics, no network permission. The microphone is only used when
+  you measure a speaker, and the recording never leaves memory.
 
 ## Install
 

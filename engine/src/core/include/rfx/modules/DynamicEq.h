@@ -35,8 +35,13 @@ public:
     void setBands(const DynamicBand* bands, int n);
     void process(float* left, float* right, int n);
     float activityDb() const { return activity_; }  // largest current gain change
+    /// Gain already applied before the engine (dB, <= 0): the system volume on outputs where
+    /// Android scales the mix before effects. Levels are judged on the programme itself, so the
+    /// volume knob doesn't move the threshold.
+    void setLevelOffsetDb(float db) { offsetDb_ = db; }
 
 private:
+    double offsetDb_ = 0.0;
     struct Slot {
         DynamicBand b;
         BiquadCoeffs sc, main;
@@ -66,8 +71,13 @@ public:
     void set(const Settings& s);
     void process(float* left, float* right, int n);
     float reductionDb() const { return reduction_; }
+    /// Gain already applied before the engine (dB, <= 0): the system volume on outputs where
+    /// Android scales the mix before effects. Levels are judged on the programme itself, so the
+    /// volume knob doesn't move the threshold.
+    void setLevelOffsetDb(float db) { offsetDb_ = db; }
 
 private:
+    double offsetDb_ = 0.0;
     Settings s_;
     double fs_ = 48000.0;
     BiquadCoeffs sc_, shelf_;

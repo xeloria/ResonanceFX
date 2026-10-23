@@ -86,6 +86,7 @@ class EngineService : LifecycleService() {
         running.value = true
         engine = sessions
         engineApplier = applier
+        bypassHook = { on -> lifecycleScope.launch(engineThread) { sessions.setBypass(on) } }
         startInForeground()
 
         audio.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
@@ -99,12 +100,21 @@ class EngineService : LifecycleService() {
         )
         refreshRoute()
 
-        volume = VolumeWatcher(this) { db -> lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.LOUDNESS_VOLUME, db) } }
+        volume = VolumeWatcher(this) { db, preScaled ->
+            lifecycleScope.launch(engineThread) {
+                sessions.setRuntime(Params.LOUDNESS_VOLUME, db)
+                sessions.setRuntime(Params.INPUT_LEVEL_OFFSET, if (preScaled) db.coerceAtLeast(-9600) else 0)
+            }
+        }
         headTracker = HeadTracker(this) { yaw -> lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.SPATIAL_YAW, yaw) } }
         // Only listen while the module that uses the measurement is on.
         lifecycleScope.launch {
             repository.settings.collect { s ->
-                if (s.bool("loud.enable") && s.int("loud.mode") == 0) volume.start() else volume.stop()
+                // Loudness compensation follows the volume; the level-dependent modules need it to
+                // judge the programme rather than the volume knob.
+                val levelModules = listOf("agc.enable", "fet.enable", "mbc.enable", "deq.enable", "deess.enable")
+                if ((s.bool("loud.enable") && s.int("loud.mode") == 0) || levelModules.any { s.bool(it) }) volume.start()
+                else volume.stop()
                 headTracker.setEnabled(s.bool("spatial.enable") && s.bool("spatial.tracking"))
             }
         }
@@ -174,6 +184,7 @@ class EngineService : LifecycleService() {
         runBlocking(engineThread) { sessions.releaseAll() }
         running.value = false
         engine = null
+        bypassHook = null
         super.onDestroy()
     }
 
@@ -228,6 +239,12 @@ class EngineService : LifecycleService() {
             private set
         @Volatile var engineApplier: Applier? = null
             private set
+        @Volatile private var bypassHook: ((Boolean) -> Unit)? = null
+
+        /** Pauses effects (for a speaker measurement) or restores them. */
+        fun setBypass(on: Boolean) {
+            bypassHook?.invoke(on)
+        }
 
         fun start(context: Context, action: String? = null, extras: Intent? = null) {
             val intent = Intent(context, EngineService::class.java).setAction(action)

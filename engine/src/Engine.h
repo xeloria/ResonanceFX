@@ -18,6 +18,7 @@
 #include "rfx/modules/Eq.h"
 #include "rfx/modules/Multiband.h"
 #include "rfx/modules/Spatial.h"
+#include "rfx/modules/Speaker.h"
 #include "rfx/modules/Spectral.h"
 
 namespace rfx {
@@ -32,7 +33,10 @@ public:
     Engine();
 
     void prepare(double sampleRate);
-    void reset();
+    /// Clears signal state (filters, delay lines, envelopes). Android sends disable/config/enable
+    /// around every seek and track change on some outputs, so by default what the playback gain
+    /// control has learned is kept; `full` (a new sample rate) forgets that too.
+    void reset(bool full = false);
     /// value/size: the parameter's value bytes as received (int32 scalars or a fixed payload).
     /// Returns 0 or -EINVAL.
     int setParameter(int32_t id, const uint8_t* value, uint32_t size);
@@ -72,11 +76,16 @@ private:
     float stageStep_ = 0.0f;
     std::vector<float> dryL_, dryR_;
     std::atomic<uint64_t> lastProcessMs_{0};
+#ifdef RFX_DIAG
+    void diagnostics(const float* l, const float* r, int n);
+    double diagSum_ = 0.0, diagPeak_ = 0.0;
+    int diagFrames_ = 0;
+#endif
 
     // ---- modules, in processing order ----
     Stage stDdc_, stAutoEq_, stConv_, stUserEq_, stLegacyEq_, stGeq_, stLoud_, stDeq_, stDeess_, stVocal_,
         stVse_, stBass_, stDyn_, stClarity_, stTube_, stAnalog_, stComp_, stMbc_, stField_, stHaas_, stCure_,
-        stHrtf_, stReverb_, stSpeaker_, stAgc_;
+        stHrtf_, stReverb_, stXtc_, stSpeaker_, stAgc_, stProtect_;
 
     fx::BiquadCascade ddc_;
     ParametricEq autoEq_{32}, userEq_{32}, legacyEq_{31}, geq_{31}, loud_{64};
@@ -102,8 +111,10 @@ private:
     Crossfeed cure_;
     HrtfSpatializer hrtf_;
     Reverb reverb_;
+    CrosstalkCanceller xtc_;
     fx::SpeakerVoicing speaker_;
     Agc agc_;
+    SpeakerProtector protect_;
     Limiter limiter_;
 
     // ---- parameter state (protocol units) ----
@@ -147,10 +158,15 @@ private:
     int spectrumRef_ = 7600, spectrumAmount_ = 0;
     int fieldDepth_ = 200, fieldMid_ = 150;
     int crossChannel_ = 0;
+    int speakerProfile_ = 0, speakerStrength_ = 100;
+    SpeakerProtector::Settings protectSettings_;
+    CrosstalkCanceller::Settings xtcSettings_;
 
     // ---- master ----
     LinearRamp outGain_, panL_, panR_;
     float targetGain_ = 1.0f;
+    float levelOffsetDb_ = 0.0f;
+    int agcMaxCut_ = 0;
     int pan_ = 0;
 
     // ---- convolution kernel upload ----

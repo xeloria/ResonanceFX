@@ -28,8 +28,11 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Reports the music stream's volume in dBFS x100 (what loudness compensation follows). */
-class VolumeWatcher(private val context: Context, private val onVolume: (Int) -> Unit) {
+/**
+ * Reports the music stream's volume in dBFS x100 (what loudness compensation follows) and whether
+ * Android has already applied it to the mix the engine processes ([preScaled]).
+ */
+class VolumeWatcher(private val context: Context, private val onVolume: (db: Int, preScaled: Boolean) -> Unit) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private var registered = false
 
@@ -55,7 +58,7 @@ class VolumeWatcher(private val context: Context, private val onVolume: (Int) ->
 
     /** Also called when the output device changes: each device has its own volume curve. */
     fun report() {
-        if (registered) onVolume((currentDb() * 100).roundToInt().coerceIn(-12000, 0))
+        if (registered) onVolume((currentDb() * 100).roundToInt().coerceIn(-12000, 0), outputType() in softwareVolume)
     }
 
     private fun currentDb(): Float {
@@ -81,6 +84,16 @@ class VolumeWatcher(private val context: Context, private val onVolume: (Int) ->
     }
 
     companion object {
+        /**
+         * Outputs where Android scales the mix by the volume before the effects run (measured on a
+         * Galaxy S24 Ultra: 16 dB more input level from volume step 4 to 8 on the speaker).
+         * Bluetooth devices normally set their volume themselves (absolute volume) and get the
+         * full-level mix.
+         */
+        private val softwareVolume = setOf(
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE,
+        )
         private const val ACTION_VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION"
         private const val EXTRA_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
     }

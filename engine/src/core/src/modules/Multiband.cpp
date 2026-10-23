@@ -91,7 +91,7 @@ void MultibandCompressor::process(float* left, float* right, int n) {
         double outL = 0.0, outR = 0.0;
         for (int b = 0; b < nb; ++b) {
             const double peak = std::max(std::fabs(bl[b]), std::fabs(br[b]));
-            const double xDb = 20.0 * std::log10(std::max(peak, 1e-6));
+            const double xDb = 20.0 * std::log10(std::max(peak, 1e-6)) - offsetDb_;
             const double xL = xDb - gainComputer(b, xDb);
             y1_[b] = std::max(xL, aR_[b] * y1_[b] + (1.0 - aR_[b]) * xL);
             yL_[b] = aA_[b] * yL_[b] + (1.0 - aA_[b]) * y1_[b];

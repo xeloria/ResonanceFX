@@ -76,6 +76,7 @@ import io.github.resonancefx.driver.DriverStatus
 import io.github.resonancefx.model.AutoEqControl
 import io.github.resonancefx.model.BandsControl
 import io.github.resonancefx.model.GraphicEqControl
+import io.github.resonancefx.model.MeasureControl
 import io.github.resonancefx.model.Catalog
 import io.github.resonancefx.model.Choice
 import io.github.resonancefx.model.Control
@@ -276,6 +277,20 @@ private fun ControlRow(control: Control, settings: Settings, onChange: (String, 
             onChange(control.key, it)
         }
         is BandsControl -> BandsEditor(settings.string(control.key), settings.int("peq.preamp")) { onChange(control.key, it) }
+        is MeasureControl -> MeasureRow(
+            settings.string(control.key),
+            usingMeasured = settings.int(Catalog.KEY_SPEAKER_PROFILE) == Catalog.PROFILE_MEASURED,
+            onSave = {
+                onChange(control.key, it)
+                onChange(Catalog.KEY_SPEAKER_PROFILE, Catalog.PROFILE_MEASURED)
+                onChange(Catalog.KEY_SPEAKER_ENABLE, true)
+            },
+            onUse = { onChange(Catalog.KEY_SPEAKER_PROFILE, Catalog.PROFILE_MEASURED) },
+            onDelete = {
+                onChange(control.key, "")
+                if (settings.int(Catalog.KEY_SPEAKER_PROFILE) == Catalog.PROFILE_MEASURED) onChange(Catalog.KEY_SPEAKER_PROFILE, 0)
+            },
+        )
         is AutoEqControl -> AutoEqRow(settings.string(control.key), settings.int(Catalog.KEY_AUTOEQ_STRENGTH)) { onChange(control.key, it) }
     }
 }

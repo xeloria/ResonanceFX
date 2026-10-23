@@ -60,6 +60,7 @@ public:
     double momentaryLufs() const;   // 400 ms window
     double shortTermLufs() const;   // 3 s window
     bool blockReady() { bool r = newBlock_; newBlock_ = false; return r; }  // a new 100 ms block arrived
+    int blocks() const { return filled_; }  // 100 ms blocks measured since reset (saturates)
 
     static BiquadCoeffs kWeightingShelf(double sampleRate);
     static BiquadCoeffs kWeightingHighPass(double sampleRate);

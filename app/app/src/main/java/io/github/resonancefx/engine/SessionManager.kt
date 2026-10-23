@@ -8,6 +8,7 @@ import io.github.resonancefx.data.AttachMode
 import io.github.resonancefx.data.Settings
 import io.github.resonancefx.driver.EngineEffect
 import io.github.resonancefx.driver.Params
+import io.github.resonancefx.model.Catalog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,8 +24,11 @@ class SessionManager(private val applier: Applier) {
     private val effects = LinkedHashMap<Int, Pair<String, EngineEffect>>()
     private var settings: Settings = Settings.DEFAULT
     private var mode = AttachMode.GLOBAL
+    private var started = false  // setMode() has run: attaching is wanted
     // Values the service measures (system volume, head yaw), re-sent to every new instance.
     private val runtime = LinkedHashMap<Int, Int>()
+    // Effects paused while the app measures a speaker.
+    private var bypassed = false
 
     private val _attached = MutableStateFlow<List<Attached>>(emptyList())
     val attached: StateFlow<List<Attached>> = _attached.asStateFlow()
@@ -35,7 +39,9 @@ class SessionManager(private val applier: Applier) {
     val primary: EngineEffect? get() = effects.values.firstOrNull()?.second
 
     fun setMode(newMode: AttachMode) {
-        if (newMode == mode && (newMode != AttachMode.GLOBAL || effects.containsKey(GLOBAL_SESSION))) return
+        val first = !started
+        started = true
+        if (!first && newMode == mode && (newMode != AttachMode.GLOBAL || effects.containsKey(GLOBAL_SESSION))) return
         mode = newMode
         releaseAll()
         if (newMode == AttachMode.GLOBAL) attach(GLOBAL_SESSION, "android")
@@ -56,7 +62,12 @@ class SessionManager(private val applier: Applier) {
         val changed = newSettings.diff(settings)
         settings = newSettings
         if (changed.isEmpty()) return
-        effects.values.forEach { (_, fx) -> runSafely { applier.applyChanged(fx, newSettings, changed) } }
+        effects.values.forEach { (_, fx) ->
+            runSafely {
+                applier.applyChanged(fx, newSettings, changed)
+                if (bypassed) fx.enabled = false
+            }
+        }
         reattachIfLost()
     }
 
@@ -64,6 +75,12 @@ class SessionManager(private val applier: Applier) {
     fun setRuntime(param: Int, value: Int) {
         if (runtime.put(param, value) == value) return
         effects.values.forEach { (_, fx) -> runSafely { fx.set(param, value) } }
+    }
+
+    /** Pauses every instance (true) or restores the master switch (false). */
+    fun setBypass(on: Boolean) {
+        bypassed = on
+        effects.values.forEach { (_, fx) -> runSafely { fx.enabled = !on && settings.bool(Catalog.KEY_MASTER) } }
     }
 
     /** Periodic health check: replaces engine handles that died with audioserver. */
@@ -78,6 +95,7 @@ class SessionManager(private val applier: Applier) {
     private fun applyAll(fx: EngineEffect) {
         applier.applyAll(fx, settings)
         runtime.forEach { (param, value) -> fx.set(param, value) }
+        if (bypassed) fx.enabled = false
     }
 
     fun releaseAll() {
@@ -121,6 +139,9 @@ class SessionManager(private val applier: Applier) {
             detach(id)
             attach(id, value.first)
         }
+        // An attach made while audioserver was still restarting fails ("Cannot initialize effect
+        // engine"); keep trying instead of staying off until the app restarts.
+        if (started && mode == AttachMode.GLOBAL && !effects.containsKey(GLOBAL_SESSION)) attach(GLOBAL_SESSION, "android")
     }
 
     private inline fun runSafely(block: () -> Unit) {

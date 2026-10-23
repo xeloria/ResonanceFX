@@ -72,9 +72,14 @@ public:
     void set(const Settings& s);
     void process(float* left, float* right, int n);
     float gainReductionDb() const { return grDb_; }
+    /// Gain already applied before the engine (dB, <= 0): the system volume on outputs where
+    /// Android scales the mix before effects. Levels are judged on the programme itself, so the
+    /// volume knob doesn't move the threshold.
+    void setLevelOffsetDb(float db) { offsetDb_ = db; }
 
 private:
     double gainComputer(int b, double xDb) const;
+    double offsetDb_ = 0.0;
     Settings s_;
     double fs_ = 48000.0;
     LrCrossover xo_;

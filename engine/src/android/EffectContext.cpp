@@ -166,6 +166,9 @@ int32_t EffectContext::command(uint32_t code, uint32_t size, void* data, uint32_
             *static_cast<effect_config_t*>(reply) = config_;
             return 0;
         case EFFECT_CMD_RESET:
+#ifdef RFX_DIAG
+            RFX_LOGI("diag cmd RESET");
+#endif
             engine_.reset();
             replyStatus(0);
             return 0;
@@ -173,6 +176,9 @@ int32_t EffectContext::command(uint32_t code, uint32_t size, void* data, uint32_
         case EFFECT_CMD_DISABLE:
             if (!reply || replyCap != sizeof(int32_t)) return -EINVAL;
             enabled_ = code == EFFECT_CMD_ENABLE;
+#ifdef RFX_DIAG
+            RFX_LOGI("diag cmd %s", enabled_ ? "ENABLE" : "DISABLE");
+#endif
             if (enabled_) engine_.reset();
             replyStatus(0);
             return 0;
@@ -271,7 +277,9 @@ int32_t EffectContext::getParameter(const effect_param_t* p, effect_param_t* rep
             return putInt(static_cast<int32_t>(kFeatureChannelCount | kFeatureParametricEq | kFeatureLoudness |
                                                kFeatureUserEq | kFeatureGraphicEq | kFeatureMultiband |
                                                kFeatureDynamicEq | kFeatureDeEsser | kFeatureVocal | kFeatureSpatial |
-                                               kFeatureTrueStereoKernel));
+                                               kFeatureTrueStereoKernel | kFeatureSpeakerProfiles |
+                                               kFeatureSpeakerProtection | kFeatureCrosstalk |
+                                               kFeatureLevelOffset));
         default:
             return -EINVAL;
     }

@@ -40,6 +40,10 @@ object Params {
     const val FEATURE_VOCAL = 0x100
     const val FEATURE_SPATIAL = 0x200
     const val FEATURE_TRUE_STEREO_KERNEL = 0x400
+    const val FEATURE_SPEAKER_PROFILES = 0x800
+    const val FEATURE_SPEAKER_PROTECTION = 0x1000
+    const val FEATURE_CROSSTALK = 0x2000
+    const val FEATURE_LEVEL_OFFSET = 0x4000
 
     // Setters outside the effect range
     /** 1 = timestamp every processed buffer so GET_STREAMING works. */
@@ -192,6 +196,23 @@ object Params {
     const val SPATIAL_ROOM = 65767         // %
     const val SPATIAL_YAW = 65768          // degrees x100, runtime
     const val SPATIAL_TRACKING = 65769
+
+    // Speaker correction, enabled by SPEAKER_OPTIMIZATION.
+    const val SPEAKER_PROFILE = 65771      // 0 phone .. 6 TV, 7 measured
+    const val SPEAKER_STRENGTH = 65772     // %
+    const val SPEAKER_CORRECTION = 65773   // same payload as USER_EQ_FILTERS
+
+    const val SPEAKER_PROTECT_ENABLE = 65775
+    const val SPEAKER_PROTECT_RESONANCE = 65776 // Hz
+    const val SPEAKER_PROTECT_LIMIT = 65777     // dB x100
+
+    const val CROSSTALK_ENABLE = 65780
+    const val CROSSTALK_AMOUNT = 65781     // %
+    const val CROSSTALK_SPACING = 65782    // cm
+    const val CROSSTALK_DISTANCE = 65783   // cm
+
+    const val AGC_MAX_CUT = 65785          // dB x100; 0 = only lift quiet programme
+    const val INPUT_LEVEL_OFFSET = 65786   // dB x100, runtime: volume Android applied before us
 
     // Payload sizes the engine accepts for array parameters.
     const val DDC_PAYLOAD_BYTES = 1024

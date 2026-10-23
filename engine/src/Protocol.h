@@ -54,12 +54,16 @@ enum Feature : uint32_t {
     kFeatureVocal = 1u << 8,
     kFeatureSpatial = 1u << 9,
     kFeatureTrueStereoKernel = 1u << 10,  // 4-path convolution kernels
+    kFeatureSpeakerProfiles = 1u << 11,   // speaker correction profiles + measured correction
+    kFeatureSpeakerProtection = 1u << 12,
+    kFeatureCrosstalk = 1u << 13,
+    kFeatureLevelOffset = 1u << 14,  // kInputLevelOffset and kAgcMaxCut
 };
 
 // ---- Housekeeping -----------------------------------------------------------------------------
 enum Control : int32_t {
     kSetUpdateStatus = 0x9002,  // accepted for compatibility; streaming status is always tracked
-    kSetResetStatus = 0x9003,   // clears every module's state
+    kSetResetStatus = 0x9003,   // clears every module's signal state (adaptive gains are kept)
 };
 
 // ---- Effects -----------------------------------------------------------------------------------
@@ -133,7 +137,7 @@ enum Param : int32_t {
     kChannelPan = 65587,    // -100..100
     kLimiterCeiling = 65588,  // linear x100 (30..100)
 
-    kSpeakerOptimization = 65603,
+    kSpeakerOptimization = 65603,  // enables the speaker correction (kSpeakerProfile)
 
     kCompEnable = 65610,
     kCompThreshold = 65611,   // 0..100 -> -60..0 dB
@@ -209,6 +213,32 @@ enum Param : int32_t {
     kSpatialRoom = 65767,   // 0..100 %
     kSpatialYaw = 65768,    // head yaw, degrees x100 (runtime, from head tracking)
     kSpatialTracking = 65769,
+
+    // Speaker correction (enabled by kSpeakerOptimization). Profile 0 phone, 1 tablet, 2 laptop,
+    // 3 small Bluetooth speaker, 4 large Bluetooth / home speaker, 5 car, 6 TV, 7 measured.
+    // CORRECTION has the kUserEqFilters payload: the bands fitted to the user's measurement.
+    kSpeakerProfile = 65771,
+    kSpeakerStrength = 65772,  // 0..100 %
+    kSpeakerCorrection = 65773,
+
+    // Speaker protection: excursion limiter.
+    kSpeakerProtectEnable = 65775,
+    kSpeakerProtectResonance = 65776,  // driver resonance, Hz
+    kSpeakerProtectLimit = 65777,      // excursion ceiling, dB x100 (-3000..0)
+
+    // Crosstalk cancellation for closely spaced speakers.
+    kCrosstalkEnable = 65780,
+    kCrosstalkAmount = 65781,    // 0..100 %
+    kCrosstalkSpacing = 65782,   // speaker spacing, cm
+    kCrosstalkDistance = 65783,  // listening distance, cm
+
+    // Playback gain control: how far loud programme may be turned down, dB x100 (0 = only lift
+    // quiet programme).
+    kAgcMaxCut = 65785,
+    // Gain the system applied before the engine, dB x100 (<= 0; runtime). On outputs where
+    // Android scales the mix by the volume before effects, the app sends that volume so the
+    // dynamics modules judge the programme's own level.
+    kInputLevelOffset = 65786,
 };
 
 }  // namespace rfx::proto

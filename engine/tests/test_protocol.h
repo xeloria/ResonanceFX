@@ -32,3 +32,4 @@ using namespace rfx::proto;
 #define PARAM_PARAMETRIC_EQ_ENABLE kAutoEqEnable
 #define PARAM_PARAMETRIC_EQ_FILTERS kAutoEqFilters
 #define PARAM_REVERBERATION_ENABLE kReverbEnable
+#define PARAM_SET_RESET_STATUS kSetResetStatus

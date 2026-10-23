@@ -55,7 +55,7 @@ void Compressor::process(float* left, float* right, int n) {
         const double sl = biquadTick(hp_, hpL_, left[i]);
         const double sr = biquadTick(hp_, hpR_, right[i]);
         const double peak = std::max(std::fabs(sl), std::fabs(sr));
-        const double xDb = 20.0 * std::log10(std::max(peak, 1e-6));
+        const double xDb = 20.0 * std::log10(std::max(peak, 1e-6)) - offsetDb_;
         const double xL = xDb - gainComputer(xDb);
         y1_ = std::max(xL, aR_ * y1_ + (1.0 - aR_) * xL);
         yL_ = aA_ * yL_ + (1.0 - aA_) * y1_;
@@ -80,21 +80,34 @@ void Agc::prepare(double fs) {
 void Agc::reset() {
     meter_.reset();
     gainDb_ = 0.0;
+    primed_ = false;
+    silentBlocks_ = 0;
     ramp_.snap(1.0f);
 }
 
 void Agc::process(float* left, float* right, int n) {
     meter_.process(left, right, n);
     if (meter_.blockReady()) {
-        const double m = meter_.momentaryLufs();
-        if (m > -50.0) {
-            const double desired = clampv(static_cast<double>(s_.targetLufs) - m, -12.0,
+        // Loudness of the programme itself, before the system volume scaled it.
+        const double m = meter_.momentaryLufs() - offsetDb_;
+        if (meter_.blocks() >= 3 && m > -50.0) {
+            silentBlocks_ = 0;
+            const double desired = clampv(static_cast<double>(s_.targetLufs) - m,
+                                          -clampv(static_cast<double>(s_.maxCutDb), 0.0, 24.0),
                                           static_cast<double>(s_.maxGainDb));
-            const double sp = clampv(static_cast<double>(s_.speed), 0.0, 1.0);
-            const double tauDown = 4.0 + (0.5 - 4.0) * sp;   // reduce gain: 4 s .. 0.5 s
-            const double tauUp = 12.0 + (2.0 - 12.0) * sp;   // increase gain: 12 s .. 2 s
-            const double tau = desired < gainDb_ ? tauDown : tauUp;
-            gainDb_ += (1.0 - std::exp(-0.1 / tau)) * (desired - gainDb_);
+            if (!primed_) {
+                gainDb_ = desired;
+                primed_ = true;
+            } else {
+                const double sp = clampv(static_cast<double>(s_.speed), 0.0, 1.0);
+                const double tauDown = 2.0 - 1.7 * sp;  // reduce gain: 2 s .. 0.3 s
+                const double tauUp = 4.0 - 3.0 * sp;    // increase gain: 4 s .. 1 s
+                const double tau = desired < gainDb_ ? tauDown : tauUp;
+                gainDb_ += (1.0 - std::exp(-0.1 / tau)) * (desired - gainDb_);
+            }
+        } else if (++silentBlocks_ >= 20) {
+            // Two seconds of silence: a new track is coming, level it from its first notes.
+            primed_ = false;
         }
         ramp_.setTarget(dbToGainf(static_cast<float>(gainDb_)), static_cast<int>(0.1 * fs_));
     }

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "Log.h"
 #include "Protocol.h"
 #include "rfx/dsp/Common.h"
 #include "rfx/modules/Loudness.h"
@@ -94,8 +95,10 @@ void Engine::prepare(double sampleRate) {
     cure_.prepare(fs_);
     hrtf_.prepare(fs_);
     reverb_.prepare(fs_);
+    xtc_.prepare(fs_);
     speaker_.prepare(fs_);
     agc_.prepare(fs_);
+    protect_.prepare(fs_);
     limiter_.prepare(fs_);
 
     // Re-derive everything that depends on the rate.
@@ -121,6 +124,9 @@ void Engine::prepare(double sampleRate) {
     deess_.set(deessSettings_);
     vocal_.set(vocalSettings_);
     cure_.set(cureSettings_);
+    xtc_.set(xtcSettings_);
+    protect_.set(protectSettings_);
+    speaker_.setProfile(speakerProfile_, speakerStrength_ / 100.0f);
     {
         // Valve character without audible distortion at normal levels.
         Tube::Settings ts;
@@ -140,13 +146,14 @@ void Engine::prepare(double sampleRate) {
         kernelCrc_ = 0;
         commitKernel(1, crc, id);
     }
-    reset();
+    reset(true);
 }
 
-void Engine::reset() {
+void Engine::reset(bool full) {
     for (Stage* st : {&stDdc_, &stAutoEq_, &stConv_, &stUserEq_, &stLegacyEq_, &stGeq_, &stLoud_, &stDeq_, &stDeess_,
                       &stVocal_, &stVse_, &stBass_, &stDyn_, &stClarity_, &stTube_, &stAnalog_, &stComp_, &stMbc_,
-                      &stField_, &stHaas_, &stCure_, &stHrtf_, &stReverb_, &stSpeaker_, &stAgc_}) {
+                      &stField_, &stHaas_, &stCure_, &stHrtf_, &stReverb_, &stXtc_, &stSpeaker_, &stAgc_,
+                      &stProtect_}) {
         st->mix = st->target ? 1.0f : 0.0f;
     }
     ddc_.reset();
@@ -170,8 +177,10 @@ void Engine::reset() {
     cure_.reset();
     hrtf_.reset();
     reverb_.reset();
+    xtc_.reset();
     speaker_.reset();
-    agc_.reset();
+    if (full) agc_.reset();
+    protect_.reset();
     limiter_.reset();
     outGain_.snap(targetGain_);
 }
@@ -189,6 +198,7 @@ int Engine::setParameter(int32_t id, const uint8_t* value, uint32_t size) {
         case kGraphicEqGains:
         case kMultibandSettings:
         case kDynamicEqBands:
+        case kSpeakerCorrection:
             return setPayload(id, value, size);
         default:
             break;
@@ -204,7 +214,12 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
     const bool on = a != 0;
     switch (id) {
         case kSetUpdateStatus: return 0;
-        case kSetResetStatus: reset(); return 0;
+        case kSetResetStatus:
+#ifdef RFX_DIAG
+            RFX_LOGI("diag app RESET_STATUS");
+#endif
+            reset();
+            return 0;
 
         case kConvEnable: stConv_.target = on; return 0;
         case kConvPrepare: {
@@ -277,6 +292,15 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
         case kAgcRatio: agc_p_.ratio = a; applyAgc(); return 0;
         case kAgcVolume: agc_p_.volume = clampv(a, 10, 100); applyAgc(); return 0;
         case kAgcMaxScaler: agc_p_.maxScaler = clampv(a, 100, 3000); applyAgc(); return 0;
+        case kAgcMaxCut: agcMaxCut_ = clampv(a, 0, 2400); applyAgc(); return 0;
+        case kInputLevelOffset:
+            levelOffsetDb_ = clampv(a, -9600, 0) / 100.0f;
+            agc_.setLevelOffsetDb(levelOffsetDb_);
+            comp_.setLevelOffsetDb(levelOffsetDb_);
+            mbc_.setLevelOffsetDb(levelOffsetDb_);
+            deq_.setLevelOffsetDb(levelOffsetDb_);
+            deess_.setLevelOffsetDb(levelOffsetDb_);
+            return 0;
 
         case kDynamicSystemEnable: stDyn_.target = on; return 0;
         case kDynamicSystemX:
@@ -415,6 +439,31 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
         case kSpatialYaw: spatial_p_.yawX100 = clampv(a, -18000, 18000); applySpatial(); return 0;
         case kSpatialTracking: spatial_p_.tracking = on; applySpatial(); return 0;
 
+        case kSpeakerProfile:
+        case kSpeakerStrength:
+            if (id == kSpeakerProfile) speakerProfile_ = clampv(a, 0, fx::SpeakerVoicing::kProfileCount - 1);
+            else speakerStrength_ = clampv(a, 0, 100);
+            speaker_.setProfile(speakerProfile_, speakerStrength_ / 100.0f);
+            return 0;
+
+        case kSpeakerProtectEnable: stProtect_.target = on; return 0;
+        case kSpeakerProtectResonance:
+        case kSpeakerProtectLimit:
+            if (id == kSpeakerProtectResonance) protectSettings_.resonanceHz = static_cast<float>(clampv(a, 30, 2000));
+            else protectSettings_.limitDb = clampv(a / 100.0f, -30.0f, 0.0f);
+            protect_.set(protectSettings_);
+            return 0;
+
+        case kCrosstalkEnable: stXtc_.target = on; return 0;
+        case kCrosstalkAmount:
+        case kCrosstalkSpacing:
+        case kCrosstalkDistance:
+            if (id == kCrosstalkAmount) xtcSettings_.amount = clampv(a, 0, 100) / 100.0f;
+            else if (id == kCrosstalkSpacing) xtcSettings_.spacingCm = static_cast<float>(clampv(a, 2, 100));
+            else xtcSettings_.distanceCm = static_cast<float>(clampv(a, 10, 500));
+            xtc_.set(xtcSettings_);
+            return 0;
+
         default:
             return -EINVAL;
     }
@@ -458,7 +507,8 @@ int Engine::setPayload(int32_t id, const uint8_t* value, uint32_t size) {
             return 0;
         }
         case kAutoEqFilters:
-        case kUserEqFilters: {
+        case kUserEqFilters:
+        case kSpeakerCorrection: {
             const uint32_t maxBands = 32;
             if (count > maxBands || 1 + static_cast<uint64_t>(count) * 4 > floatsAvailable) return -EINVAL;
             const auto f = floats(4, 1 + count * 4);
@@ -480,6 +530,10 @@ int Engine::setPayload(int32_t id, const uint8_t* value, uint32_t size) {
                 // At or above Nyquist a band can't be realised: skip it.
                 if (b[1] >= 0.4999f * static_cast<float>(fs_)) continue;
                 bands.push_back(e);
+            }
+            if (id == kSpeakerCorrection) {
+                speaker_.setMeasured(bands.data(), static_cast<int>(bands.size()), preamp);
+                return 0;
             }
             ParametricEq& eq = id == kAutoEqFilters ? autoEq_ : userEq_;
             eq.setBands(bands.data(), static_cast<int>(bands.size()));
@@ -652,6 +706,7 @@ void Engine::applyAgc() {
     Agc::Settings s;
     s.targetLufs = -14.0f + linearX100ToDb(agc_p_.volume);
     s.maxGainDb = linearX100ToDb(agc_p_.maxScaler);
+    s.maxCutDb = agcMaxCut_ / 100.0f;
     s.speed = agc_p_.ratio <= 50 ? 0.25f : agc_p_.ratio <= 100 ? 0.5f : 0.85f;
     agc_.set(s);
 }
@@ -803,9 +858,30 @@ void Engine::process(float* left, float* right, int frames) {
     lastProcessMs_.store(nowMs(), std::memory_order_relaxed);
     for (int done = 0; done < frames; done += kMaxBlock) {
         const int n = std::min(kMaxBlock, frames - done);
+#ifdef RFX_DIAG
+        diagnostics(left + done, right + done, n);
+#endif
         processBlock(left + done, right + done, n);
     }
 }
+
+#ifdef RFX_DIAG
+// Temporary field diagnostics: once a second, the level the engine receives (before any
+// processing) and what the playback gain control is doing.
+void Engine::diagnostics(const float* l, const float* r, int n) {
+    for (int i = 0; i < n; ++i) {
+        diagSum_ += 0.5 * (static_cast<double>(l[i]) * l[i] + static_cast<double>(r[i]) * r[i]);
+        diagPeak_ = std::max(diagPeak_, static_cast<double>(std::max(std::fabs(l[i]), std::fabs(r[i]))));
+    }
+    diagFrames_ += n;
+    if (diagFrames_ < static_cast<int>(fs_)) return;
+    RFX_LOGI("diag in rms %.1f dBFS peak %.1f dBFS | agc on=%d mix=%.2f gain %+.1f dB meter %.1f LUFS | mbc on=%d gr %.1f dB",
+             powerToDb(diagSum_ / diagFrames_), gainToDb(diagPeak_), stAgc_.target ? 1 : 0, stAgc_.mix, agc_.gainDb(),
+             agc_.momentaryLufs(), stMbc_.target ? 1 : 0, mbc_.gainReductionDb());
+    diagSum_ = diagPeak_ = 0.0;
+    diagFrames_ = 0;
+}
+#endif
 
 void Engine::processBlock(float* l, float* r, int n) {
     run(stDdc_, l, r, n, [&](float* a, float* b, int m) { ddc_.process(a, b, m); }, [&] { ddc_.reset(); });
@@ -894,6 +970,7 @@ void Engine::processBlock(float* l, float* r, int n) {
         },
         [&] { hrtf_.reset(); hrtfEq_.reset(); });
     run(stReverb_, l, r, n, [&](float* a, float* b, int m) { reverb_.process(a, b, m); }, [&] { reverb_.reset(); });
+    run(stXtc_, l, r, n, [&](float* a, float* b, int m) { xtc_.process(a, b, m); }, [&] { xtc_.reset(); });
     run(stSpeaker_, l, r, n, [&](float* a, float* b, int m) { speaker_.process(a, b, m); }, [&] { speaker_.reset(); });
     run(stAgc_, l, r, n, [&](float* a, float* b, int m) { agc_.process(a, b, m); }, [&] { agc_.reset(); });
 
@@ -908,6 +985,8 @@ void Engine::processBlock(float* l, float* r, int n) {
         l[i] *= g * panL_.next();
         r[i] *= g * panR_.next();
     }
+    // Protection sees the final level, after every boost and the output gain.
+    run(stProtect_, l, r, n, [&](float* a, float* b, int m) { protect_.process(a, b, m); }, [&] { protect_.reset(); });
     limiter_.process(l, r, n);
 }
 

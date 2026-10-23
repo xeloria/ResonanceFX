@@ -12,8 +12,8 @@ SDK="${ANDROID_SDK:-${ANDROID_HOME:-${LOCALAPPDATA:-$HOME}/Android/Sdk}}"
 NDK_VERSION="${NDK_VERSION:-$(ls "$SDK/ndk" | sort -V | tail -1)}"
 NDK="$SDK/ndk/$NDK_VERSION"
 CMAKE_DIR="$(ls -d "$SDK"/cmake/* | sort -V | tail -1)/bin"
-VERSION_CODE="${VERSION_CODE:-20000}"
-VERSION_NAME="${VERSION_NAME:-2.0.0}"
+VERSION_CODE="${VERSION_CODE:-20100}"
+VERSION_NAME="${VERSION_NAME:-2.1.0}"
 
 # minSdk 21 (Android 5.0) for every ABI: the oldest release the module supports.
 ABIS=(arm64-v8a armeabi-v7a x86_64 x86)

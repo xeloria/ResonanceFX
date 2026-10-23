@@ -59,6 +59,9 @@ class GraphicEqControl(override val key: String, override val label: String, val
  *  3 low-pass, 4 high-pass, 5 band-pass, 6 notch. */
 class BandsControl(override val key: String, override val label: String) : Control
 
+/** The user's own speaker measurement and the correction fitted to it (see [Composite.Measurement]). */
+class MeasureControl(override val key: String, override val label: String) : Control
+
 class Section(
     val id: String,
     val title: String,
@@ -81,6 +84,22 @@ object Catalog {
     const val KEY_AUTOEQ_ENABLE = "autoeq.enable"
     const val KEY_AUTOEQ_PROFILE = "autoeq.profile"
     const val KEY_AUTOEQ_STRENGTH = "autoeq.strength"
+    const val KEY_SPEAKER_ENABLE = "speaker.enable"
+    const val KEY_SPEAKER_PROFILE = "speaker.profile"
+    const val KEY_SPEAKER_MEASURED = "speaker.measured"
+
+    /** Engine speaker profiles, in protocol order; the last one plays the user's measurement. */
+    val SPEAKER_PROFILES = listOf(
+        "Phone", "Tablet", "Laptop", "Small Bluetooth speaker", "Large Bluetooth or home speaker", "Car", "TV",
+        "Measured (your speaker)",
+    )
+    val PROFILE_MEASURED = SPEAKER_PROFILES.lastIndex
+
+    /** Speaker classes for protection, with the driver resonance each one implies (Hz). */
+    val SPEAKER_SIZES = listOf(
+        "Phone" to 700, "Tablet or laptop" to 400, "Small Bluetooth speaker" to 150,
+        "Large Bluetooth or home speaker" to 70, "Car or hi-fi speakers" to 40,
+    )
 
     val sections: List<Section> = listOf(
         Section(
@@ -159,14 +178,18 @@ object Catalog {
             },
         ),
         Section(
-            "agc", "Playback gain control", "Levels quiet and loud tracks automatically.",
+            "agc", "Playback gain control",
+            "Lifts quiet tracks and videos to an even level. For short sounds, use a compressor.",
             "agc.enable", Params.AGC_ENABLE,
             listOf(
-                Choice("agc.ratio", "Strength", listOf("Gentle", "Medium", "Strong"), 0) { fx, v ->
+                Choice("agc.ratio", "Speed", listOf("Gentle", "Medium", "Fast"), 0) { fx, v ->
                     fx.set(Params.AGC_RATIO, Tables.AGC_RATIO_VALUES[v])
                 },
-                Slider("agc.volume", "Target level", 0..5, 0, { "${Tables.OUTPUT_DB[it]} dB" }) { fx, v ->
+                Slider("agc.volume", "Target loudness", 0..5, 5, { "%.1f LUFS".format(-14f + Tables.OUTPUT_DB[it].toFloat()) }) { fx, v ->
                     fx.set(Params.AGC_VOLUME, Tables.OUTPUT_DB_VALUES[v])
+                },
+                Slider("agc.cut", "Turn loud tracks down", 0..12, 0, { if (it == 0) "Never" else "Up to $it dB" }) { fx, v ->
+                    fx.set(Params.AGC_MAX_CUT, v * 100)
                 },
                 Slider("agc.max", "Maximum gain", 0..10, 3, { "${Tables.MULTI_FACTOR_VALUES[it] / 100}x" }) { fx, v ->
                     fx.set(Params.AGC_MAX_SCALER, Tables.MULTI_FACTOR_VALUES[v])
@@ -396,8 +419,47 @@ object Catalog {
             ),
         ),
         Section(
-            "speaker", "Speaker optimization", "Compensates for small phone speakers.",
-            "speaker.enable", Params.SPEAKER_OPTIMIZATION, emptyList(),
+            "speaker", "Speaker correction",
+            "Natural balance on phone, laptop, Bluetooth, car and TV speakers, or on yours, measured.",
+            "speaker.enable", Params.SPEAKER_OPTIMIZATION,
+            listOf(
+                Choice(KEY_SPEAKER_PROFILE, "Speaker", SPEAKER_PROFILES, 0) { _, _ -> },
+                Slider("speaker.strength", "Strength", 0..100, 100, ::percent) { _, _ -> },
+                MeasureControl(KEY_SPEAKER_MEASURED, "Your measurement"),
+            ),
+            feature = Params.FEATURE_SPEAKER_PROFILES,
+            compose = { fx, s ->
+                fx.set(Params.SPEAKER_CORRECTION, Composite.speakerCorrection(s.string(KEY_SPEAKER_MEASURED)))
+                fx.set(Params.SPEAKER_PROFILE, s.int(KEY_SPEAKER_PROFILE))
+                fx.set(Params.SPEAKER_STRENGTH, s.int("speaker.strength"))
+            },
+        ),
+        Section(
+            "protect", "Speaker protection",
+            "Holds back bass a small speaker can't play, so it goes louder without rattling or distorting.",
+            "protect.enable", Params.SPEAKER_PROTECT_ENABLE,
+            listOf(
+                Choice("protect.size", "Speaker", SPEAKER_SIZES.map { it.first }, 0) { fx, v ->
+                    fx.set(Params.SPEAKER_PROTECT_RESONANCE, SPEAKER_SIZES[v].second)
+                },
+                Slider("protect.limit", "Bass ceiling", -24..-3, -12, { "$it dB" }) { fx, v ->
+                    fx.set(Params.SPEAKER_PROTECT_LIMIT, v * 100)
+                },
+            ),
+            feature = Params.FEATURE_SPEAKER_PROTECTION,
+        ),
+        Section(
+            "xtc", "Speaker widening",
+            "Crosstalk cancellation: stereo that reaches past the edges of a phone, tablet or laptop.",
+            "xtc.enable", Params.CROSSTALK_ENABLE,
+            listOf(
+                Slider("xtc.amount", "Width", 0..100, 60, ::percent) { fx, v -> fx.set(Params.CROSSTALK_AMOUNT, v) },
+                Slider("xtc.spacing", "Speaker spacing", 4..60, 15, { "$it cm" }) { fx, v -> fx.set(Params.CROSSTALK_SPACING, v) },
+                Slider("xtc.distance", "Listening distance", 20..200, 40, { "$it cm" }) { fx, v ->
+                    fx.set(Params.CROSSTALK_DISTANCE, v)
+                },
+            ),
+            feature = Params.FEATURE_CROSSTALK,
         ),
     )
 
@@ -417,6 +479,7 @@ object Catalog {
                         is AutoEqControl -> put(c.key, "")
                         is GraphicEqControl -> put(c.key, "")
                         is BandsControl -> put(c.key, "")
+                        is MeasureControl -> put(c.key, "")
                     }
                 }
             }

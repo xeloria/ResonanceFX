@@ -110,16 +110,29 @@ private:
     ParametricEq tone_{2};
 };
 
-/// Small-speaker voicing: protects the driver below its useful range and restores perceived
-/// bass with harmonics (see the psychoacoustic bass in the core), plus a presence lift.
+/// Loudspeaker correction. Built-in profiles are typical corrections for a class of speaker
+/// (each one an EQ curve at 100 % strength); `kMeasured` uses bands fitted to the user's own
+/// measurement of their speaker. Strength scales every band's gain.
 class SpeakerVoicing {
 public:
+    enum Profile { kPhone = 0, kTablet, kLaptop, kSmallBluetooth, kLargeBluetooth, kCar, kTv, kMeasured, kProfileCount };
+    static constexpr int kMaxBands = 32;
+
     void prepare(double sampleRate);
     void reset();
+    void setProfile(int profile, float strength /*0..1*/);
+    /// The measured correction (only heard with kMeasured).
+    void setMeasured(const EqBand* bands, int n, float preampDb);
     void process(float* left, float* right, int n);
 
 private:
-    ParametricEq eq_{3};
+    void rebuild();
+    double fs_ = 48000.0;
+    int profile_ = kPhone;
+    float strength_ = 1.0f;
+    std::vector<EqBand> measured_;
+    float measuredPreampDb_ = 0.0f;
+    ParametricEq eq_{kMaxBands};
 };
 
 }  // namespace rfx::fx

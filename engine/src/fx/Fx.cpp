@@ -273,19 +273,101 @@ void AnalogColor::process(float* left, float* right, int n) {
 
 // ---- SpeakerVoicing -------------------------------------------------------------------------------
 
+namespace {
+
+struct ProfileBand {
+    FilterType type;
+    float freq, gainDb, q;
+};
+
+// Typical responses of each speaker class and what restores a natural balance on them. High-
+// passes keep energy the driver can't reproduce from turning into distortion; gains are at
+// 100 % strength.
+const std::vector<ProfileBand>& profileBands(int profile) {
+    static const std::vector<ProfileBand> kProfiles[SpeakerVoicing::kMeasured] = {
+        // Phone: micro-speakers roll off below ~300 Hz; lift what they can still play and the
+        // presence region they mask, without pushing the 1-2 kHz "honk".
+        {{FilterType::HighPass, 150.0f, 0.0f, 0.7071f},
+         {FilterType::Peak, 320.0f, 3.0f, 1.0f},
+         {FilterType::Peak, 1500.0f, -1.5f, 1.4f},
+         {FilterType::Peak, 3000.0f, 2.0f, 1.2f},
+         {FilterType::HighShelf, 10000.0f, 1.5f, 0.7071f}},
+        // Tablet: larger drivers and cavities, a little more low end to work with.
+        {{FilterType::HighPass, 110.0f, 0.0f, 0.7071f},
+         {FilterType::Peak, 220.0f, 3.0f, 0.9f},
+         {FilterType::Peak, 2500.0f, 1.5f, 1.2f},
+         {FilterType::HighShelf, 9000.0f, 1.5f, 0.7071f}},
+        // Laptop: down-firing drivers sound muffled and boxy; trim the box, open the top.
+        {{FilterType::HighPass, 120.0f, 0.0f, 0.7071f},
+         {FilterType::Peak, 250.0f, 2.5f, 1.0f},
+         {FilterType::Peak, 600.0f, -2.0f, 1.4f},
+         {FilterType::Peak, 4000.0f, -1.0f, 2.0f},
+         {FilterType::HighShelf, 8000.0f, 2.5f, 0.7071f}},
+        // Small Bluetooth speaker: passive-radiator bass bump, recessed treble.
+        {{FilterType::HighPass, 55.0f, 0.0f, 0.7071f},
+         {FilterType::Peak, 120.0f, -1.5f, 1.2f},
+         {FilterType::Peak, 2500.0f, -1.0f, 1.5f},
+         {FilterType::HighShelf, 8000.0f, 2.0f, 0.7071f}},
+        // Large Bluetooth / home speaker: boomy upper bass is the usual problem.
+        {{FilterType::HighPass, 30.0f, 0.0f, 0.7071f},
+         {FilterType::Peak, 100.0f, -2.0f, 1.0f},
+         {FilterType::Peak, 300.0f, -1.0f, 1.2f},
+         {FilterType::HighShelf, 9000.0f, 1.0f, 0.7071f}},
+        // Car: cabin gain piles up the low end; door speakers fire at the knees, so lift the
+        // presence region to bring the image up to the dashboard.
+        {{FilterType::Peak, 60.0f, -2.0f, 0.8f},
+         {FilterType::Peak, 160.0f, -2.5f, 1.4f},
+         {FilterType::Peak, 2500.0f, 2.0f, 1.0f},
+         {FilterType::HighShelf, 8000.0f, 1.5f, 0.7071f}},
+        // TV: thin, rear-firing speakers; body and dialogue clarity.
+        {{FilterType::HighPass, 80.0f, 0.0f, 0.7071f},
+         {FilterType::Peak, 160.0f, 2.0f, 1.0f},
+         {FilterType::Peak, 2500.0f, 2.0f, 1.2f},
+         {FilterType::HighShelf, 10000.0f, 1.0f, 0.7071f}},
+    };
+    return kProfiles[clampv(profile, 0, SpeakerVoicing::kMeasured - 1)];
+}
+
+}  // namespace
+
 void SpeakerVoicing::prepare(double sampleRate) {
+    fs_ = sampleRate;
     eq_.prepare(sampleRate);
     eq_.setMatched(true);
-    EqBand bands[3];
-    // Phone speakers roll off below ~250 Hz; energy down there only adds distortion.
-    bands[0] = {true, FilterType::HighPass, 150.0f, 0.0f, 0.7071f, 0};
-    // Upper-bass / low-mid lift where they still respond, presence lift for intelligibility.
-    bands[1] = {true, FilterType::Peak, 320.0f, 3.0f, 1.0f, 0};
-    bands[2] = {true, FilterType::Peak, 3000.0f, 2.0f, 1.2f, 0};
-    eq_.setBands(bands, 3);
+    rebuild();
 }
 
 void SpeakerVoicing::reset() { eq_.reset(); }
+
+void SpeakerVoicing::setProfile(int profile, float strength) {
+    profile_ = clampv(profile, 0, kProfileCount - 1);
+    strength_ = clampv(strength, 0.0f, 1.0f);
+    rebuild();
+}
+
+void SpeakerVoicing::setMeasured(const EqBand* bands, int n, float preampDb) {
+    measured_.assign(bands, bands + clampv(n, 0, kMaxBands));
+    measuredPreampDb_ = preampDb;
+    if (profile_ == kMeasured) rebuild();
+}
+
+void SpeakerVoicing::rebuild() {
+    std::vector<EqBand> bands;
+    float preamp = 0.0f;
+    if (profile_ == kMeasured) {
+        bands = measured_;
+        for (EqBand& b : bands)
+            if (filterHasGain(b.type)) b.gainDb *= strength_;
+        preamp = measuredPreampDb_ * strength_;
+    } else {
+        for (const ProfileBand& p : profileBands(profile_)) {
+            if (p.freq >= 0.45 * fs_) continue;
+            bands.push_back({true, p.type, p.freq, p.gainDb * strength_, p.q, 0});
+        }
+    }
+    eq_.setBands(bands.data(), static_cast<int>(bands.size()));
+    eq_.setPreampDb(preamp);
+}
 
 void SpeakerVoicing::process(float* left, float* right, int n) { eq_.process(left, right, n); }
 

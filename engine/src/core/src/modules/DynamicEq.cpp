@@ -102,7 +102,7 @@ void DynamicEq::process(float* left, float* right, int n) {
             for (int i = 0; i < m; ++i) {
                 const double x = 0.5 * (left[off + i] + right[off + i]);
                 const double y = std::fabs(biquadTick(s.sc, s.scS, x));
-                const double yDb = 20.0 * std::log10(std::max(y, 1e-7));
+                const double yDb = 20.0 * std::log10(std::max(y, 1e-7)) - offsetDb_;
                 const double c = yDb > s.env ? s.aA : s.aR;
                 s.env = c * s.env + (1.0 - c) * yDb;
             }
@@ -155,7 +155,7 @@ void DeEsser::process(float* left, float* right, int n) {
     for (int i = 0; i < n; ++i) {
         const double x = 0.5 * (left[i] + right[i]);
         const double y = std::fabs(biquadTick(sc_, sc2_, biquadTick(sc_, sc1_, x)));
-        const double yDb = 20.0 * std::log10(std::max(y, 1e-7));
+        const double yDb = 20.0 * std::log10(std::max(y, 1e-7)) - offsetDb_;
         const double c = yDb > env_ ? aA_ : aR_;
         env_ = c * env_ + (1.0 - c) * yDb;
         if (++counter_ >= kUpdate) {

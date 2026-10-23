@@ -453,6 +453,211 @@ static void testParametricEq() {
     }
 }
 
+// Steady-state gain (dB) of a sine at `hz` and `amp`; `side` drives the channels in antiphase.
+static double measureGainDbAt(Fx &fx, double hz, uint32_t rate, float amp, bool side) {
+    const int frames = 512;
+    double inE = 0, outE = 0;
+    for (int block = 0; block < 400; block++) {
+        std::vector<float> in(frames * 2), out(frames * 2);
+        for (int i = 0; i < frames; i++) {
+            const float v = amp * (float) sin(2 * M_PI * hz * (block * frames + i) / rate);
+            in[i * 2] = v;
+            in[i * 2 + 1] = side ? -v : v;
+        }
+        audio_buffer_t ib{(size_t) frames, {in.data()}}, ob{(size_t) frames, {out.data()}};
+        fx.process(&ib, &ob);
+        if (block < 200) continue;
+        for (int i = 0; i < frames * 2; i++) { inE += in[i] * in[i]; outE += out[i] * out[i]; }
+    }
+    return 10 * log10(outE / inE);
+}
+
+static void testSpeakerModules() {
+    {
+        Fx fx;
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        uint32_t features = 0; fx.get(PARAM_GET_FEATURES, &features, 4);
+        CHECK(features & kFeatureSpeakerProfiles, "features must advertise speaker profiles");
+        CHECK(features & kFeatureSpeakerProtection, "features must advertise speaker protection");
+        CHECK(features & kFeatureCrosstalk, "features must advertise crosstalk cancellation");
+    }
+    {
+        // Measured correction: a +6 dB peak at 1 kHz, scaled by strength.
+        Fx fx;
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.simple(EFFECT_CMD_ENABLE);
+        fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+        fx.set(PARAM_GATE_LIMIT, {100});
+        const double base = measureGainDb(fx, 1000, 48000);
+        std::vector<uint8_t> payload(1024, 0);
+        uint32_t count = 1;
+        float f[5] = {0.0f, 0.0f, 1000.0f, 6.0f, 1.0f};
+        memcpy(payload.data(), &count, 4);
+        memcpy(payload.data() + 4, f, sizeof(f));
+        CHECK(fx.setParam(kSpeakerCorrection, payload.data(), payload.size()) == 0, "speaker correction accepted");
+        fx.set(kSpeakerProfile, {7});
+        fx.set(kSpeakerOptimization, {1});
+        const double full = measureGainDb(fx, 1000, 48000) - base;
+        CHECK(fabs(full - 6.0) < 0.3, "measured correction at 100%%: %.2f dB, expected +6", full);
+        fx.set(kSpeakerStrength, {50});
+        const double half = measureGainDb(fx, 1000, 48000) - base;
+        CHECK(fabs(half - 3.0) < 0.3, "measured correction at 50%%: %.2f dB, expected +3", half);
+        uint32_t huge = 100; memcpy(payload.data(), &huge, 4);
+        CHECK(fx.setParam(kSpeakerCorrection, payload.data(), payload.size()) != 0, "oversized correction must fail");
+        // Every built-in profile is stable and finite.
+        for (int profile = 0; profile < 7; profile++) {
+            fx.set(kSpeakerProfile, {profile});
+            fx.set(kSpeakerStrength, {100});
+            const double g = measureGainDb(fx, 1000, 48000) - base;
+            CHECK(std::isfinite(g) && fabs(g) < 4.0, "profile %d: 1 kHz gain %.2f dB", profile, g);
+        }
+    }
+    {
+        // Protection: loud bass below the driver's resonance is held down; quiet bass and the
+        // midrange are untouched.
+        Fx fx;
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.simple(EFFECT_CMD_ENABLE);
+        fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+        fx.set(PARAM_GATE_LIMIT, {100});
+        const double bassBase = measureGainDbAt(fx, 150, 48000, 0.7f, false);
+        const double midBase = measureGainDbAt(fx, 3000, 48000, 0.7f, false);
+        const double quietBase = measureGainDbAt(fx, 150, 48000, 0.02f, false);
+        fx.set(kSpeakerProtectResonance, {200});
+        fx.set(kSpeakerProtectLimit, {-1200});
+        fx.set(kSpeakerProtectEnable, {1});
+        const double bass = measureGainDbAt(fx, 150, 48000, 0.7f, false) - bassBase;
+        const double mid = measureGainDbAt(fx, 3000, 48000, 0.7f, false) - midBase;
+        const double quiet = measureGainDbAt(fx, 150, 48000, 0.02f, false) - quietBase;
+        // -3.1 dBFS, predicted excursion about -5 dB (subsonic high-pass and excursion model)
+        // against a -12 dB ceiling: about 7 dB of reduction.
+        CHECK(bass < -4.0 && bass > -11.0, "protected 150 Hz at -3 dBFS: %.2f dB, expected about -7", bass);
+        CHECK(fabs(mid) < 0.5, "protection changed 3 kHz by %.2f dB", mid);
+        // Only the subsonic high-pass (100 Hz) acts on quiet bass: about -0.8 dB at 150 Hz.
+        CHECK(fabs(quiet) < 1.5, "protection changed quiet 150 Hz by %.2f dB", quiet);
+    }
+    {
+        // Crosstalk cancellation: the centre stays as it is, the side is lifted, and the
+        // recursion stays bounded on full-scale noise.
+        Fx fx;
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.simple(EFFECT_CMD_ENABLE);
+        fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+        fx.set(PARAM_GATE_LIMIT, {100});
+        const double midBase = measureGainDbAt(fx, 1000, 48000, 0.1f, false);
+        const double sideBase = measureGainDbAt(fx, 1000, 48000, 0.1f, true);
+        fx.set(kCrosstalkAmount, {100});
+        fx.set(kCrosstalkSpacing, {15});
+        fx.set(kCrosstalkDistance, {40});
+        fx.set(kCrosstalkEnable, {1});
+        const double mid = measureGainDbAt(fx, 1000, 48000, 0.1f, false) - midBase;
+        const double side = measureGainDbAt(fx, 1000, 48000, 0.1f, true) - sideBase;
+        CHECK(fabs(mid) < 0.1, "crosstalk cancellation changed the centre by %.2f dB", mid);
+        CHECK(side > 3.0, "crosstalk cancellation side gain %.2f dB, expected a lift", side);
+        uint32_t seed = 1;
+        bool bounded = true;
+        for (int block = 0; block < 2000; block++) {
+            std::vector<float> in(512), out(512);
+            for (float &v : in) { seed = seed * 1664525u + 1013904223u; v = (float) ((seed >> 8) / 8388608.0 - 1.0); }
+            audio_buffer_t ib{256, {in.data()}}, ob{256, {out.data()}};
+            fx.process(&ib, &ob);
+            for (float v : out) bounded &= std::isfinite(v) && fabsf(v) <= 1.0f;
+        }
+        CHECK(bounded, "crosstalk cancellation output not bounded on noise");
+    }
+}
+
+// Runs `seconds` of a 1 kHz stereo sine at `amp` and returns the gain (dB) over the last `tail`
+// seconds of it.
+static double sineGainDb(Fx &fx, float amp, double seconds, double tail) {
+    const int frames = 480;
+    const int blocks = (int) (seconds * 48000 / frames), measured = (int) (tail * 48000 / frames);
+    static long phase = 0;
+    double inE = 0, outE = 0;
+    for (int block = 0; block < blocks; block++) {
+        std::vector<float> in(frames * 2), out(frames * 2);
+        for (int i = 0; i < frames; i++, phase++) in[i * 2] = in[i * 2 + 1] = amp * (float) sin(2 * M_PI * 1000.0 * phase / 48000);
+        audio_buffer_t ib{(size_t) frames, {in.data()}}, ob{(size_t) frames, {out.data()}};
+        fx.process(&ib, &ob);
+        if (block < blocks - measured) continue;
+        for (int i = 0; i < frames * 2; i++) { inE += in[i] * in[i]; outE += out[i] * out[i]; }
+    }
+    return 10 * log10(outE / inE);
+}
+
+static void startAgc(Fx &fx) {
+    fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+    fx.simple(EFFECT_CMD_ENABLE);
+    fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+    fx.set(PARAM_GATE_LIMIT, {100});
+    fx.set(kAgcVolume, {100});     // target -14 LUFS
+    fx.set(kAgcMaxScaler, {400});  // up to +12 dB
+    fx.set(kAgcRatio, {50});       // gentle
+    fx.set(kAgcEnable, {1});
+}
+
+static void testPlaybackGain() {
+    {
+        // A quiet track (-31 LUFS) is lifted to the +12 dB limit within half a second.
+        Fx fx;
+        startAgc(fx);
+        double g = sineGainDb(fx, 0.03f, 0.6, 0.1);
+        CHECK(fabs(g - 12.0) < 0.5, "AGC after 0.6 s: %+.2f dB, expected +12", g);
+        // Android disables, reconfigures and re-enables the effect around seeks: the learned gain
+        // must survive that.
+        fx.simple(EFFECT_CMD_DISABLE);
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.simple(EFFECT_CMD_ENABLE);
+        g = sineGainDb(fx, 0.03f, 0.05, 0.05);
+        CHECK(fabs(g - 12.0) < 0.5, "AGC right after disable/config/enable: %+.2f dB, expected +12", g);
+        fx.simple(EFFECT_CMD_RESET);
+        fx.set(PARAM_SET_RESET_STATUS, {1});
+        g = sineGainDb(fx, 0.03f, 0.05, 0.05);
+        CHECK(fabs(g - 12.0) < 0.5, "AGC right after reset commands: %+.2f dB, expected +12", g);
+    }
+    {
+        // Loud programme is left alone by default, turned down only when allowed.
+        Fx fx;
+        startAgc(fx);
+        double g = sineGainDb(fx, 0.5f, 1.0, 0.2);
+        CHECK(fabs(g) < 0.3, "boost-only AGC changed a loud track by %+.2f dB", g);
+        fx.set(kAgcMaxCut, {600});
+        g = sineGainDb(fx, 0.5f, 8.0, 0.5);
+        CHECK(fabs(g + 6.0) < 0.5, "AGC with 6 dB cut allowed: %+.2f dB, expected -6", g);
+    }
+    {
+        // With the system volume applied before the engine (here -20 dB), a quiet input is
+        // really a loud track played softly: no lift.
+        Fx fx;
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.set(kInputLevelOffset, {-2000});
+        startAgc(fx);
+        double g = sineGainDb(fx, 0.03f, 1.0, 0.2);
+        CHECK(fabs(g) < 0.3, "AGC lifted a track that is only quiet because of the volume: %+.2f dB", g);
+    }
+    {
+        // The same offset makes the compressor judge the programme level: -26 dBFS peaks at -20 dB
+        // volume are -6 dB programme, 12 dB over a -18 dB threshold at 8:1.
+        Fx fx;
+        fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.simple(EFFECT_CMD_ENABLE);
+        fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+        fx.set(PARAM_GATE_LIMIT, {100});
+        fx.set(kCompThreshold, {70});
+        fx.set(kCompRatio, {100});
+        fx.set(kCompAutoGain, {0});
+        fx.set(kCompGain, {0});
+        fx.set(kCompNoClip, {0});
+        fx.set(kCompEnable, {1});
+        double g = sineGainDb(fx, 0.05f, 1.0, 0.3);
+        CHECK(fabs(g) < 0.5, "compressor acted below its threshold: %+.2f dB", g);
+        fx.set(kInputLevelOffset, {-2000});
+        g = sineGainDb(fx, 0.05f, 1.0, 0.3);
+        CHECK(g < -8.0 && g > -12.0, "compressor with -20 dB volume offset: %+.2f dB, expected about -10.5", g);
+    }
+}
+
 static void testConcurrentCommands() {
     // Binder thread hammers parameters/config while the audio thread processes: must never crash
     // or block (process() only try_locks).
@@ -497,6 +702,8 @@ int main() {
     testConvolverUpload();
     testHeadphoneSurround();
     testParametricEq();
+    testSpeakerModules();
+    testPlaybackGain();
     testConcurrentCommands();
     if (failures == 0) printf("All engine tests passed\n");
     else printf("%d engine test failure(s)\n", failures);
