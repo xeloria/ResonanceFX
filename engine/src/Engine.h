@@ -43,6 +43,11 @@ public:
     void process(float* left, float* right, int frames);
 
     double sampleRate() const { return fs_; }
+    /// Delay the enabled modules add, in samples.
+    int latency() const;
+    /// Skips every module (output gain, balance and limiter still apply): the listening test's
+    /// "effects off" reference.
+    void setModulesOff(bool off) { modulesOff_ = off; }
     uint32_t kernelId() const { return kernelId_; }
     uint64_t lastProcessMs() const { return lastProcessMs_.load(std::memory_order_relaxed); }
 
@@ -55,6 +60,8 @@ private:
     template <class Fn, class Reset>
     void run(Stage& st, float* l, float* r, int n, Fn&& fn, Reset&& reset);
     void processBlock(float* l, float* r, int n);
+    void processModules(float* l, float* r, int n);
+    void master(float* l, float* r, int n);
 
     int setInts(int32_t id, const int32_t* v, int count);
     int setPayload(int32_t id, const uint8_t* value, uint32_t size);
@@ -166,6 +173,7 @@ private:
     LinearRamp outGain_, panL_, panR_;
     float targetGain_ = 1.0f;
     float levelOffsetDb_ = 0.0f;
+    bool modulesOff_ = false;
     int agcMaxCut_ = 0;
     int pan_ = 0;
 

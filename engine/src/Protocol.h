@@ -40,7 +40,10 @@ enum Get : int32_t {
     kGetArchitecture = 11,
     kGetChannelCount = 12,
     kGetFeatures = 13,          // bitmask of kFeature*
+    kGetAbxDelta = 14,          // listening test: loudness of B minus A, dB x100 (kAbxNotReady until measured)
 };
+
+inline constexpr int32_t kAbxNotReady = INT32_MIN;
 
 enum Feature : uint32_t {
     kFeatureChannelCount = 1u << 0,
@@ -58,6 +61,8 @@ enum Feature : uint32_t {
     kFeatureSpeakerProtection = 1u << 12,
     kFeatureCrosstalk = 1u << 13,
     kFeatureLevelOffset = 1u << 14,  // kInputLevelOffset and kAgcMaxCut
+    kFeatureAbx = 1u << 15,          // blind listening test (kAbx*)
+    kFeatureMeasuredProtection = 1u << 16,  // kSpeakerProtectCeilings / kSpeakerProtectMode
 };
 
 // ---- Housekeeping -----------------------------------------------------------------------------
@@ -225,12 +230,18 @@ enum Param : int32_t {
     kSpeakerProtectEnable = 65775,
     kSpeakerProtectResonance = 65776,  // driver resonance, Hz
     kSpeakerProtectLimit = 65777,      // excursion ceiling, dB x100 (-3000..0)
+    // Measured mode: 1024-byte payload [5][5 ceilings, dBFS peak] for the bands below 125 Hz,
+    // 125-250, 250-500, 500-1000 and above 1 kHz (>= 0: no limit), from the user's distortion
+    // measurement; MODE 1 uses them, 0 the excursion model.
+    kSpeakerProtectCeilings = 65778,
+    kSpeakerProtectMode = 65779,
 
     // Crosstalk cancellation for closely spaced speakers.
     kCrosstalkEnable = 65780,
     kCrosstalkAmount = 65781,    // 0..100 %
     kCrosstalkSpacing = 65782,   // speaker spacing, cm
     kCrosstalkDistance = 65783,  // listening distance, cm
+    kCrosstalkOrientation = 65784,  // 0..100 % of the width applied (runtime: follows how the device is held)
 
     // Playback gain control: how far loud programme may be turned down, dB x100 (0 = only lift
     // quiet programme).
@@ -239,6 +250,13 @@ enum Param : int32_t {
     // Android scales the mix by the volume before effects, the app sends that volume so the
     // dynamics modules judge the programme's own level.
     kInputLevelOffset = 65786,
+
+    // Blind listening test. While MODE is 1 a second engine renders the reference (A): every
+    // effect off (EXCLUDE 0), or only the effect whose enable id EXCLUDE names. SELECT 0 plays A,
+    // 1 plays B (the chain as set); both are time-aligned and loudness-matched.
+    kAbxMode = 65790,
+    kAbxExclude = 65791,
+    kAbxSelect = 65792,
 };
 
 }  // namespace rfx::proto

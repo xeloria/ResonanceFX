@@ -8,10 +8,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import io.github.resonancefx.data.Repository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class App : Application() {
     lateinit var repository: Repository
         private set
+
+    /** For work that must finish even when the screen that started it goes away. */
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onCreate() {
         super.onCreate()

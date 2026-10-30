@@ -27,8 +27,12 @@ Use the issue templates. For "the engine doesn't load", please attach:
 1. Bump the version in `module/module.prop` (`version`, `versionCode`),
    `app/app/build.gradle.kts` (`versionName`, `versionCode`) and `scripts/build-engine.sh`
    and `engine/CMakeLists.txt` (engine version), and add a section to `CHANGELOG.md`.
-2. Commit, then tag and push: `git tag v2.0.1 && git push origin v2.0.1`.
-3. The **Release** workflow builds the module and the app and publishes both with checksums.
+2. Run `tests/measure-engine.sh` (Linux / WSL, about 25 minutes). It refreshes
+   `app/app/src/main/assets/measurements.json`, the engine measurements the app shows and the
+   release publishes. Commit it with the release.
+3. Commit, then tag and push: `git tag v2.0.1 && git push origin v2.0.1`.
+4. The **Release** workflow builds the module and the app and publishes both, plus the
+   measurements, with checksums.
 
 For a stable app signature, add these repository secrets once (Settings → Secrets and variables
 → Actions): `RFX_KEYSTORE_BASE64` (`base64 -w0 release.jks`), `RFX_KEYSTORE_PASSWORD`,

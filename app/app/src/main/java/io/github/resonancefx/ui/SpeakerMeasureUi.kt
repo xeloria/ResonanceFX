@@ -8,6 +8,14 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.LaunchedEffect
+import io.github.resonancefx.App
+import io.github.resonancefx.data.Repository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -62,9 +71,23 @@ import kotlin.math.roundToInt
 
 /** The measurement card in the speaker correction section. */
 @Composable
-fun MeasureRow(value: String, usingMeasured: Boolean, onSave: (String) -> Unit, onUse: () -> Unit, onDelete: () -> Unit) {
+fun MeasureRow(
+    value: String,
+    usingMeasured: Boolean,
+    match: String,
+    onSave: (String) -> Unit,
+    onMatch: (reference: String, refitted: String) -> Unit,
+    onUse: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val measurement = remember(value) { Composite.parseMeasurement(value) }
     var measuring by remember { mutableStateOf(false) }
+    var others by remember { mutableStateOf<List<Repository.MeasuredSpeaker>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(value) {
+        others = withContext(Dispatchers.IO) { App.instance.repository.otherMeasurements() }
+    }
+    val reference = others.firstOrNull { it.key == match }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
         Text("Your measurement", style = MaterialTheme.typography.titleSmall)
         if (measurement == null) {
@@ -74,7 +97,17 @@ fun MeasureRow(value: String, usingMeasured: Boolean, onSave: (String) -> Unit, 
             )
             Button(onClick = { measuring = true }, modifier = Modifier.fillMaxWidth()) { Text("Measure speaker") }
         } else {
-            MeasurementSummary(measurement)
+            MeasurementSummary(measurement, reference)
+            if (others.isNotEmpty()) {
+                // Refit to another measured speaker's sound, or back to the natural target.
+                SoundLike(others, match) { key ->
+                    scope.launch {
+                        val ref = others.firstOrNull { it.key == key }?.measurement
+                        val refitted = withContext(Dispatchers.Default) { CorrectionFitter.refit(measurement, ref) }
+                        onMatch(if (ref == null) "" else key, Composite.formatMeasurement(refitted))
+                    }
+                }
+            }
             if (!usingMeasured) {
                 Text(
                     "Pick \"Measured\" above to hear it.",
@@ -98,23 +131,72 @@ fun MeasureRow(value: String, usingMeasured: Boolean, onSave: (String) -> Unit, 
 }
 
 @Composable
-private fun MeasurementSummary(m: Composite.Measurement) {
+private fun SoundLike(others: List<Repository.MeasuredSpeaker>, match: String, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val current = others.firstOrNull { it.key == match }?.label ?: "Natural (neutral speaker target)"
+    Column {
+        Text("Sound like", style = MaterialTheme.typography.bodyMedium)
+        Box {
+            OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) { Text(current) }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                DropdownMenuItem(text = { Text("Natural (neutral speaker target)") }, onClick = { open = false; onPick("") })
+                others.forEach { o ->
+                    DropdownMenuItem(text = { Text(o.label) }, onClick = { open = false; onPick(o.key) })
+                }
+            }
+        }
+        Text(
+            "Makes this speaker sound like another one you measured, within the range both can play.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun MeasurementSummary(m: Composite.Measurement, reference: Repository.MeasuredSpeaker? = null) {
     val correction = remember(m) { CorrectionFitter.correctionDb(m) }
     val corrected = remember(m) { m.responseDb.mapIndexed { i, v -> v + correction[i] } }
     val scheme = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         MeasurementGraph(
-            listOf(m.responseDb to scheme.outline, corrected to scheme.primary),
+            listOfNotNull(
+                reference?.let { it.measurement.responseDb to scheme.tertiary },
+                m.responseDb to scheme.outline,
+                corrected to scheme.primary,
+            ),
             m.lowHz, m.highHz, Modifier.fillMaxWidth().height(150.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Legend(scheme.outline, "Measured")
             Legend(scheme.primary, "Corrected")
+            reference?.let { Legend(scheme.tertiary, it.label) }
         }
         Text(
             "Corrects ${roundHz(m.lowHz)} Hz – ${roundHz(m.highHz)} Hz with ${m.bands.size} filters" +
                 if (m.preampDb < 0) ", ${"%.1f".format(m.preampDb)} dB headroom" else "",
             style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant,
+        )
+        m.distortion?.let { DistortionSummary(it) }
+    }
+}
+
+/** Where each band started to distort, from the optional distortion test. */
+@Composable
+private fun DistortionSummary(d: Composite.Distortion) {
+    val names = listOf("Deep bass (below 125 Hz)", "Bass (125-250 Hz)", "Low mids (250-500 Hz)", "Mids (500 Hz-1 kHz)", "Upper mids (1-4 kHz)")
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("Distortion test", style = MaterialTheme.typography.titleSmall)
+        d.cleanUpToDb.forEachIndexed { i, level ->
+            val text = when {
+                level == null -> "clean at every level tested"
+                level < SpeakerMeasurer.DISTORTION_LEVELS.first() -> "distorts even at the quietest level tested"
+                else -> "clean up to ${"%.0f".format(level)} dB"
+            }
+            Text("${names.getOrElse(i) { "Band ${i + 1}" }}: $text", style = MaterialTheme.typography.bodySmall)
+        }
+        Text(
+            "Pick \"Measured\" in Speaker protection to hold each band below where it distorts.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -177,12 +259,13 @@ private fun MeasureDialog(onDismiss: () -> Unit, onSave: (Composite.Measurement)
     var state by remember { mutableStateOf<MeasureState>(MeasureState.Intro) }
     var job by remember { mutableStateOf<Job?>(null) }
     var progress by remember { mutableFloatStateOf(0f) }
+    var testDistortion by remember { mutableStateOf(false) }
 
     fun start() {
         state = MeasureState.Running(0f)
         job = scope.launch {
             state = try {
-                MeasureState.Done(measurer.measure { progress = it })
+                MeasureState.Done(measurer.measure({ progress = it }, distortion = testDistortion))
             } catch (e: MeasureException) {
                 MeasureState.Failed(e.message ?: "The measurement failed.")
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -229,6 +312,17 @@ private fun MeasureDialog(onDismiss: () -> Unit, onSave: (Composite.Measurement)
                                 "never leaves the phone.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = testDistortion, onCheckedChange = { testDistortion = it })
+                            Column {
+                                Text("Also find where it starts to distort", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Five more sweeps, each louder, up to full scale (about 30 seconds). It stops as " +
+                                        "soon as the speaker distorts. Use it at the volume you listen at.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = ::close) { Text("Cancel") }
                             Button(onClick = ::requestStart) { Text("Start") }

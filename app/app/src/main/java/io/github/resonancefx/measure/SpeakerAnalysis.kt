@@ -16,11 +16,15 @@ import kotlin.math.log2
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** A measurement that can't be used, with a message for the user. */
-class MeasureException(message: String) : Exception(message)
+open class MeasureException(message: String) : Exception(message)
+
+/** The microphone clipped: the sweep was too loud for it (or for the speaker). */
+class OverloadException : MeasureException("The microphone overloaded. Turn the volume down a little and try again.")
 
 /** In-place iterative radix-2 FFT (unscaled in both directions). */
 internal object Fft {
@@ -84,6 +88,10 @@ object SpeakerAnalysis {
     const val TAIL_SECONDS = 1.5
     private const val F1 = 20.0
     private const val F2 = 20000.0
+    private const val WINDOW = 8192
+
+    /** Excitation bands of the distortion measurement, matching the engine's measured protection. */
+    val DISTORTION_BANDS = listOf(40.0 to 125.0, 125.0 to 250.0, 250.0 to 500.0, 500.0 to 1000.0, 1000.0 to 4000.0)
 
     val recordFrames: Int get() = ((LEAD_SECONDS + SWEEP_SECONDS + TAIL_SECONDS) * RATE).toInt()
 
@@ -107,9 +115,52 @@ object SpeakerAnalysis {
     class Result(val responseDb: FloatArray, val lowHz: Float, val highHz: Float, val snrDb: Double)
 
     fun analyse(recording: FloatArray, sweep: FloatArray): Capture {
-        if (recording.maxOf { abs(it) } > 0.98f) {
-            throw MeasureException("The microphone overloaded. Turn the volume down a little and try again.")
+        val d = deconvolve(recording, sweep)
+        // Gate: 2.5 ms before the peak to 100 ms after.
+        val power = windowPower(d.ir, d.peak, (0.1 * RATE).toInt())
+        return Capture(smooth(power, WINDOW), d.snrDb)
+    }
+
+    /**
+     * Distortion of one sweep, per protection band ([DISTORTION_BANDS]): THD (2nd-4th harmonics)
+     * as a fraction, or null where the harmonics were below the room's noise (i.e. clean).
+     * An exponential sweep puts the k-th harmonic's impulse response L*ln(k) before the linear
+     * one (Farina 2000), and at excitation frequency f its spectrum, read at k*f, relative to the
+     * linear response at f is that harmonic's level.
+     */
+    fun analyseDistortion(recording: FloatArray, sweep: FloatArray): Array<Double?> {
+        val d = deconvolve(recording, sweep)
+        val l = SWEEP_SECONDS / ln(F2 / F1)
+        val length = (0.08 * RATE).toInt()
+        val linear = windowPower(d.ir, d.peak, length)
+        val harmonics = (2..4).map { k -> windowPower(d.ir, d.peak - (l * ln(k.toDouble()) * RATE).roundToInt(), length) }
+        // Between the 2nd harmonic and the linear response there is nothing but noise.
+        val noise = windowPower(d.ir, d.peak - (0.25 * RATE).toInt(), length)
+        val binHz = RATE.toDouble() / WINDOW
+        return Array(DISTORTION_BANDS.size) { b ->
+            val (lo, hi) = DISTORTION_BANDS[b]
+            var fundamental = 0.0
+            var distortion = 0.0
+            var floor = 0.0
+            for (bin in (lo / binHz).roundToInt()..(hi / binHz).roundToInt()) {
+                fundamental += linear[bin]
+                harmonics.forEachIndexed { i, h ->
+                    val at = bin * (i + 2)
+                    if (at < h.size) {
+                        distortion += h[at]
+                        floor += noise[at]
+                    }
+                }
+            }
+            // Harmonics within twice the noise can't be told apart from it.
+            if (distortion < 2 * floor || fundamental <= 0.0) null else sqrt((distortion - floor) / fundamental)
         }
+    }
+
+    private class Deconvolved(val ir: DoubleArray, val peak: Int, val snrDb: Double)
+
+    private fun deconvolve(recording: FloatArray, sweep: FloatArray): Deconvolved {
+        if (recording.maxOf { abs(it) } > 0.98f) throw OverloadException()
         val lead = (LEAD_SECONDS * RATE).toInt()
         val noise = rms(recording, 0, (lead * 0.8).toInt())
         val signal = rms(recording, lead + RATE / 4, min(recording.size, lead + sweep.size))
@@ -145,7 +196,7 @@ object SpeakerAnalysis {
             rIm[k] = im
         }
         Fft.transform(rRe, rIm, inverse = true)
-        val ir = rRe  // real part; the 1/n scale cancels in the normalisation
+        val ir = rRe  // real part; the 1/n scale cancels in every ratio taken from it
 
         // The direct sound: the strongest peak at a plausible latency (up to the tail length).
         val maxDelay = min(n / 2, (TAIL_SECONDS * RATE).toInt() + lead)
@@ -155,29 +206,31 @@ object SpeakerAnalysis {
         if (abs(ir[peak]) < 30 * max(far, 1e-30)) {
             throw MeasureException("No clear sweep was picked up. Check the volume and that the microphone isn't covered.")
         }
+        return Deconvolved(ir, peak, snr)
+    }
 
-        // Gate: 2.5 ms before the peak to 100 ms after, with half-Hann edges.
+    /**
+     * Power spectrum ([WINDOW]-point FFT, first half) of the impulse response from 2.5 ms before
+     * [centre] to [length] samples after it, with half-Hann edges. Indices wrap around: harmonic
+     * responses sit before the start of the buffer.
+     */
+    private fun windowPower(ir: DoubleArray, centre: Int, length: Int): DoubleArray {
+        val n = ir.size
         val pre = (0.0025 * RATE).toInt()
-        val start = max(0, peak - pre)
-        val end = min(n, peak + (0.1 * RATE).toInt())
-        val m = 8192
-        val wRe = DoubleArray(m)
-        val wIm = DoubleArray(m)
-        val fadeIn = max(1, peak - start)
         val fadeOut = (0.025 * RATE).toInt()
-        for (i in start until end) {
-            val k = i - start
-            if (k >= m) break
+        val total = min(pre + length, WINDOW)
+        val re = DoubleArray(WINDOW)
+        val im = DoubleArray(WINDOW)
+        for (k in 0 until total) {
             val w = when {
-                i < peak -> 0.5 - 0.5 * cos(PI * k / fadeIn)
-                end - i < fadeOut -> 0.5 - 0.5 * cos(PI * (end - i) / fadeOut)
+                k < pre -> 0.5 - 0.5 * cos(PI * k / pre)
+                total - k < fadeOut -> 0.5 - 0.5 * cos(PI * (total - k) / fadeOut)
                 else -> 1.0
             }
-            wRe[k] = ir[i] * w
+            re[k] = ir[((centre - pre + k) % n + n) % n] * w
         }
-        Fft.transform(wRe, wIm)
-        val power = DoubleArray(m / 2) { wRe[it] * wRe[it] + wIm[it] * wIm[it] }
-        return Capture(smooth(power, m), snr)
+        Fft.transform(re, im)
+        return DoubleArray(WINDOW / 2) { re[it] * re[it] + im[it] * im[it] }
     }
 
     /** Averages the captures, normalises to the 300 Hz-3 kHz mean and finds the usable range. */
@@ -243,7 +296,11 @@ object CorrectionFitter {
     /** Loudspeakers sound most natural with a slight downward tilt (-0.5 dB/octave, 0 at 1 kHz). */
     fun targetDb(hz: Float): Float = (-0.5 * log2(hz / 1000.0)).toFloat()
 
-    fun fit(result: SpeakerAnalysis.Result): Composite.Measurement {
+    /**
+     * Fits the correction for [result]. [targetDb] (on [Response.frequencies]) is what the speaker
+     * should measure afterwards; null means the natural loudspeaker target, [targetDb].
+     */
+    fun fit(result: SpeakerAnalysis.Result, targetDb: FloatArray? = null): Composite.Measurement {
         val f = Response.frequencies
         val n = f.size
         val lowOct = log2(result.lowHz.toDouble())
@@ -255,7 +312,7 @@ object CorrectionFitter {
             (1.0 - outside * 3.0).coerceIn(0.0, 1.0).toFloat()
         }
         val desired = FloatArray(n) { i ->
-            ((targetDb(f[i]) - result.responseDb[i]).coerceIn(MAX_CUT, MAX_BOOST)) * inRange[i]
+            ((targetDb?.get(i) ?: targetDb(f[i])) - result.responseDb[i]).coerceIn(MAX_CUT, MAX_BOOST) * inRange[i]
         }
         // Outside the range the correction should stay flat, but matters less.
         val weight = FloatArray(n) { max(inRange[it], 0.25f) }
@@ -341,6 +398,19 @@ object CorrectionFitter {
             lowHz = result.lowHz,
             highHz = result.highHz,
         )
+    }
+
+    /**
+     * Refits a stored measurement: to the natural target ([reference] null), or so that this
+     * speaker sounds like [reference], another measured speaker. Matching only covers the range
+     * both can play.
+     */
+    fun refit(m: Composite.Measurement, reference: Composite.Measurement?): Composite.Measurement {
+        val low = if (reference == null) m.lowHz else maxOf(m.lowHz, reference.lowHz)
+        val high = if (reference == null) m.highHz else minOf(m.highHz, reference.highHz)
+        val result = SpeakerAnalysis.Result(m.responseDb.toFloatArray(), low, maxOf(high, low * 2), 0.0)
+        return fit(result, reference?.responseDb?.toFloatArray())
+            .copy(lowHz = m.lowHz, highHz = m.highHz, distortion = m.distortion)
     }
 
     /** The correction's response on [Response.frequencies], without the preamp. */

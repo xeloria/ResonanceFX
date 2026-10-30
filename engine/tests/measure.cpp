@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Xeloria
 //
 // Measurement tool: drives the engine through AELI exactly as Android does, and prints one JSON
-// object per scenario (frequency response, distortion, width, decay) for
-// tests/measure-engine.sh. Use it to check a DSP change didn't alter how an effect sounds.
+// object per line: first {"freqs": [...]}, then one per scenario (frequency response,
+// distortion, loudness, width, decay). tests/measure-engine.sh prints them; scripts/
+// gen-measurements.py turns them into the app's "Engine measurements" page. Use it to check a
+// DSP change didn't alter how an effect sounds.
 
 #include <cmath>
 #include <cstdio>
@@ -12,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "Protocol.h"
 #include "android/android_effect_abi.h"
 
 extern "C" audio_effect_library_t AELI;
@@ -54,6 +57,14 @@ struct Fx {
         int32_t reply = 0;
         uint32_t rs = 4;
         (*h)->command(h, 5 /*SET_PARAM*/, static_cast<uint32_t>(buf.size()), buf.data(), &rs, &reply);
+    }
+    /// Array parameter: [count][floats], padded to `size` bytes.
+    void floats(int32_t param, uint32_t count, std::initializer_list<float> v, uint32_t size = 1024) {
+        std::vector<uint8_t> payload(size, 0);
+        std::memcpy(payload.data(), &count, 4);
+        std::vector<float> f(v);
+        std::memcpy(payload.data() + 4, f.data(), f.size() * 4);
+        setRaw(param, payload.data(), size);
     }
     void set(int32_t param, std::initializer_list<int32_t> v) {
         std::vector<int32_t> a(v);
@@ -206,28 +217,43 @@ double tailDb(Setup setup) {
     return 10 * std::log10(std::max(tail, 1e-30) / click);
 }
 
-const double kFreqs[] = {25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 14000, 18000};
+// Third-octave centres, 20 Hz - 20 kHz.
+const double kFreqs[] = {20,  25,  31.5, 40,   50,   63,   80,   100,  125,   160,   200,   250,   315,   400,   500,  630,
+                         800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000};
+constexpr size_t kFreqCount = sizeof(kFreqs) / sizeof(kFreqs[0]);
 
-void report(const char* name, Setup setup, bool dynamics = false, bool crossfeed = false, bool spatial = false) {
-    std::string out = std::string("{\"name\":\"") + name + "\",\"response\":[";
-    for (size_t i = 0; i < sizeof(kFreqs) / sizeof(kFreqs[0]); ++i)
-        out += (i ? "," : "") + jnum(sineGainDb(setup, kFreqs[i], -24.0, 0));
+std::string jstr(const char* v) {
+    std::string out = "\"";
+    for (const char* c = v; *c; ++c) {
+        if (*c == '"' || *c == '\\') out += '\\';
+        out += *c;
+    }
+    return out + "\"";
+}
+
+enum Extra { kNone = 0, kDynamics = 1, kCrossfeed = 2, kSpatial = 4 };
+
+/// One scenario: `section` is the app's section id, `name` what it shows, `settings` the
+/// settings measured (the app's defaults unless stated).
+void report(const char* section, const char* name, const char* settings, Setup setup, int extra = kNone) {
+    std::string out = "{\"section\":" + jstr(section) + ",\"name\":" + jstr(name) + ",\"settings\":" + jstr(settings) +
+                      ",\"response\":[";
+    for (size_t i = 0; i < kFreqCount; ++i) out += (i ? "," : "") + jnum(sineGainDb(setup, kFreqs[i], -24.0, 0));
     out += "],\"noiseDb\":" + jnum(noiseGainDb(setup, -20.0));
     out += ",\"thd100\":" + jnum(thdPercent(setup, 100, -12.0));
     out += ",\"thd1k\":" + jnum(thdPercent(setup, 1000, -12.0));
-    if (dynamics) {
+    if (extra & kDynamics) {
         out += ",\"gain1kLoud\":" + jnum(sineGainDb(setup, 1000, -3.0, 0));
         out += ",\"gain1kQuiet\":" + jnum(sineGainDb(setup, 1000, -40.0, 0));
         out += ",\"noiseLoudDb\":" + jnum(noiseGainDb(setup, -6.0));
         out += ",\"noiseQuietDb\":" + jnum(noiseGainDb(setup, -40.0));
     }
-    if (crossfeed) {
+    if (extra & kCrossfeed) {
         out += ",\"crosstalk\":[";
-        for (size_t i = 0; i < sizeof(kFreqs) / sizeof(kFreqs[0]); ++i)
-            out += (i ? "," : "") + jnum(sineGainDb(setup, kFreqs[i], -24.0, 1));
+        for (size_t i = 0; i < kFreqCount; ++i) out += (i ? "," : "") + jnum(sineGainDb(setup, kFreqs[i], -24.0, 1));
         out += "]";
     }
-    if (spatial) {
+    if (extra & kSpatial) {
         out += ",\"widthDb\":" + jnum(widthDb(setup));
         out += ",\"tailDb\":" + jnum(tailDb(setup));
     }
@@ -237,45 +263,140 @@ void report(const char* name, Setup setup, bool dynamics = false, bool crossfeed
 
 }  // namespace
 
+using namespace rfx::proto;
+
 int main() {
-    report("off", [](Fx&) {});
-    report("bass natural 13 dB", [](Fx& f) { f.set(65575, {0}); f.set(65576, {70}); f.set(65577, {350}); f.set(65574, {1}); });
-    report("bass natural 6 dB", [](Fx& f) { f.set(65575, {0}); f.set(65576, {70}); f.set(65577, {100}); f.set(65574, {1}); });
-    report("bass pure", [](Fx& f) { f.set(65575, {1}); f.set(65576, {70}); f.set(65577, {350}); f.set(65574, {1}); });
-    report("bass subwoofer", [](Fx& f) { f.set(65575, {2}); f.set(65576, {70}); f.set(65577, {350}); f.set(65574, {1}); });
-    report("clarity natural", [](Fx& f) { f.set(65579, {0}); f.set(65580, {250}); f.set(65578, {1}); });
-    report("clarity ozone", [](Fx& f) { f.set(65579, {1}); f.set(65580, {250}); f.set(65578, {1}); });
-    report("clarity xhifi", [](Fx& f) { f.set(65579, {2}); f.set(65580, {250}); f.set(65578, {1}); });
-    report("eq bass booster", [](Fx& f) {
+    std::string head = "{\"freqs\":[";
+    for (size_t i = 0; i < kFreqCount; ++i) head += (i ? "," : "") + jnum(kFreqs[i]);
+    std::printf("%s]}\n", head.c_str());
+
+    report("master", "Bypass", "every effect off: output gain, balance and limiter only", [](Fx&) {});
+    report("master", "Output -6 dB, balance left", "output -6 dB, balance 50 % left",
+           [](Fx& f) { f.set(kOutputVolume, {50}); f.set(kChannelPan, {-50}); });
+    report("master", "Limiter at -6 dB", "limiter threshold -6 dB", [](Fx& f) { f.set(kLimiterCeiling, {50}); }, kDynamics);
+
+    report("loud", "Loudness compensation", "fixed level 60 phon, reference 80 phon, strength 70 %", [](Fx& f) {
+        f.set(kLoudnessMode, {1}); f.set(kLoudnessManual, {60}); f.set(kLoudnessReference, {80});
+        f.set(kLoudnessStrength, {70}); f.set(kLoudnessEnable, {1});
+    });
+    report("peq", "Parametric EQ", "low shelf 100 Hz +4 dB, peak 3 kHz -3 dB Q 1.4", [](Fx& f) {
+        f.floats(kUserEqFilters, 2, {0.0f, 1, 100, 4, 0.7f, 0, 3000, -3, 1.4f});
+        f.set(kUserEqEnable, {1});
+    });
+    report("geq", "Fine graphic EQ", "31 bands: +4 dB lows, -2 dB at 2.5 kHz, +3 dB highs", [](Fx& f) {
+        f.set(kGraphicEqLayout, {2});
+        f.floats(kGraphicEqGains, 31, {4, 4, 4, 4, 3.5f, 3, 2, 1, 0.5f, 0, 0, 0, 0, 0, 0, 0, 0, 0, -0.5f, -1, -1.5f, -2,
+                                       -1.5f, -1, 0, 0.5f, 1, 2, 3, 3, 3});
+        f.set(kGraphicEqEnable, {1});
+    });
+    report("eq", "Equalizer (bass boost)", "10 bands: +10, +6.5, +4 dB in the lowest three", [](Fx& f) {
         const int g[10] = {1000, 650, 400, 0, 0, 0, 0, 0, 0, 0};
-        for (int b = 0; b < 10; ++b) f.set(65552, {b, g[b]});
-        f.set(65551, {1});
+        for (int b = 0; b < 10; ++b) f.set(kEqBand, {b, g[b]});
+        f.set(kEqEnable, {1});
     });
-    report("eq v-shape", [](Fx& f) {
+    report("eq", "Equalizer (V-shape)", "10 bands: +6 dB at the ends, -2 dB in the middle", [](Fx& f) {
         const int g[10] = {600, 400, 200, 0, -200, -200, 0, 200, 400, 600};
-        for (int b = 0; b < 10; ++b) f.set(65552, {b, g[b]});
-        f.set(65551, {1});
+        for (int b = 0; b < 10; ++b) f.set(kEqBand, {b, g[b]});
+        f.set(kEqEnable, {1});
     });
-    report("spectrum extension", [](Fx& f) { f.set(65549, {7600}); f.set(65550, {560}); f.set(65548, {1}); });
-    report("field surround", [](Fx& f) { f.set(65556, {500}); f.set(65555, {150}); f.set(65553, {1}); }, false, false, true);
-    report("differential surround", [](Fx& f) { f.set(65558, {500}); f.set(65557, {1}); }, false, false, true);
-    report("headphone surround 3", [](Fx& f) { f.set(65545, {2}); f.set(65544, {1}); }, false, true, true);
-    report("reverb medium", [](Fx& f) {
-        f.set(65560, {50}); f.set(65561, {50}); f.set(65562, {30}); f.set(65563, {40}); f.set(65564, {50}); f.set(65559, {1});
-    }, false, false, true);
-    report("dynamic system", [](Fx& f) {
-        f.set(65570, {100, 5600}); f.set(65571, {40, 80}); f.set(65572, {50, 50}); f.set(65573, {1100}); f.set(65569, {1});
+
+    report("agc", "Playback gain control", "gentle, target -14 LUFS, up to 4x, never turns down", [](Fx& f) {
+        f.set(kAgcRatio, {50}); f.set(kAgcVolume, {100}); f.set(kAgcMaxScaler, {400}); f.set(kAgcEnable, {1});
+    }, kDynamics);
+    report("fet", "FET compressor", "the app's defaults (automatic knee, gain, attack)", [](Fx& f) {
+        f.set(kCompThreshold, {100}); f.set(kCompRatio, {100}); f.set(kCompAutoKnee, {1}); f.set(kCompAutoGain, {1});
+        f.set(kCompAutoAttack, {1}); f.set(kCompEnable, {1});
+    }, kDynamics);
+    report("fet", "FET compressor (-24 dB threshold)", "threshold 60 %, ratio 50 %, automatic knee, gain, attack",
+           [](Fx& f) {
+        f.set(kCompThreshold, {60}); f.set(kCompRatio, {50}); f.set(kCompAutoKnee, {1}); f.set(kCompAutoGain, {1});
+        f.set(kCompAutoAttack, {1}); f.set(kCompEnable, {1});
+    }, kDynamics);
+    report("mbc", "Multiband compressor", "3 bands, threshold -18 dB, ratio 2.5:1, speed 50 %, makeup on", [](Fx& f) {
+        f.floats(kMultibandSettings, 33, {3, 6, 1, 1, 200, 3000, 8000, 14000, -15, -18, -18, -18, -18,
+                                          2.125f, 2.5f, 2.5f, 2.5f, 2.5f, 42, 21, 21, 21, 21, 460, 230, 230, 230, 230,
+                                          0, 0, 0, 0, 0});
+        f.set(kMultibandEnable, {1});
+    }, kDynamics);
+    report("deq", "Dynamic EQ", "tame boom 4 dB, tame harshness 4 dB", [](Fx& f) {
+        f.floats(kDynamicEqBands, 4, {1, 0, 120, 1.2f, -24, -4, 3, 5, 150, 0, 1, 0, 3500, 1.5f, -30, -4, 3, 5, 150, 0,
+                                      0, 1, 100, 0.7f, -40, 0, 3, 5, 150, 1, 0, 2, 8000, 0.7f, -45, 0, 3, 5, 150, 1});
+        f.set(kDynamicEqEnable, {1});
+    }, kDynamics);
+    report("deess", "De-esser", "6.5 kHz, threshold -28 dB, up to 8 dB, split band", [](Fx& f) {
+        f.set(kDeEsserFreq, {6500}); f.set(kDeEsserThreshold, {-2800}); f.set(kDeEsserAmount, {800});
+        f.set(kDeEsserMode, {0}); f.set(kDeEsserEnable, {1});
+    }, kDynamics);
+
+    report("vocal", "Vocals & ambience", "vocals +4 dB, ambience 0 dB, focus 50 %", [](Fx& f) {
+        f.set(kVocalCentre, {400}); f.set(kVocalAmbience, {0}); f.set(kVocalLow, {120}); f.set(kVocalHigh, {10000});
+        f.set(kVocalFocus, {50}); f.set(kVocalEnable, {1});
+    }, kSpatial);
+    report("spatial", "Spatial audio", "speakers at +-30 degrees, room 30 %", [](Fx& f) {
+        f.set(kSpatialAngle, {30}); f.set(kSpatialRoom, {30}); f.set(kSpatialEnable, {1});
+    }, kCrossfeed | kSpatial);
+    report("field", "Field surround", "strength 4, mid image 50 %", [](Fx& f) {
+        f.set(kFieldSurroundDepth, {500}); f.set(kFieldSurroundMidImage, {150}); f.set(kFieldSurroundEnable, {1});
+    }, kSpatial);
+    report("diff", "Differential surround", "5 ms", [](Fx& f) { f.set(kDiffSurroundDelay, {500}); f.set(kDiffSurroundEnable, {1}); },
+           kSpatial);
+    report("vhe", "Headphone surround+", "quality 3", [](Fx& f) {
+        f.set(kHeadphoneSurroundLevel, {2}); f.set(kHeadphoneSurroundEnable, {1});
+    }, kCrossfeed | kSpatial);
+    report("reverb", "Reverberation", "room 50 %, width 50 %, damping 30 %, wet 40 %", [](Fx& f) {
+        f.set(kReverbRoomSize, {50}); f.set(kReverbWidth, {50}); f.set(kReverbDamping, {30}); f.set(kReverbWet, {40});
+        f.set(kReverbDry, {50}); f.set(kReverbEnable, {1});
+    }, kSpatial);
+    report("cure", "Auditory protection (mild)", "binaural level mild", [](Fx& f) {
+        f.set(kCrossfeedLevel, {0}); f.set(kCrossfeedEnable, {1});
+    }, kCrossfeed);
+    report("cure", "Auditory protection (strong)", "binaural level strong", [](Fx& f) {
+        f.set(kCrossfeedLevel, {2}); f.set(kCrossfeedEnable, {1});
+    }, kCrossfeed);
+
+    report("bass", "Bass enhancer (natural)", "natural, 70 Hz, 13 dB", [](Fx& f) {
+        f.set(kBassMode, {0}); f.set(kBassFreq, {70}); f.set(kBassGain, {350}); f.set(kBassEnable, {1});
     });
-    report("crossfeed default", [](Fx& f) { f.set(65582, {0}); f.set(65581, {1}); }, false, true);
-    report("crossfeed meier", [](Fx& f) { f.set(65582, {2}); f.set(65581, {1}); }, false, true);
-    report("tube", [](Fx& f) { f.set(65583, {1}); });
-    report("analogx medium", [](Fx& f) { f.set(65585, {1}); f.set(65584, {1}); });
-    report("speaker optimization", [](Fx& f) { f.set(65603, {1}); });
-    report("fet compressor", [](Fx& f) {
-        f.set(65611, {60}); f.set(65612, {50}); f.set(65614, {1}); f.set(65616, {1}); f.set(65618, {1}); f.set(65610, {1});
-    }, true);
-    report("playback gain", [](Fx& f) { f.set(65566, {100}); f.set(65567, {80}); f.set(65568, {300}); f.set(65565, {1}); }, true);
-    report("output -6 dB pan left", [](Fx& f) { f.set(65586, {50}); f.set(65587, {-50}); });
-    report("limiter -6 dB", [](Fx& f) { f.set(65588, {50}); }, true);
+    report("bass", "Bass enhancer (pure bass+)", "pure bass+, 70 Hz, 13 dB", [](Fx& f) {
+        f.set(kBassMode, {1}); f.set(kBassFreq, {70}); f.set(kBassGain, {350}); f.set(kBassEnable, {1});
+    });
+    report("bass", "Bass enhancer (subwoofer)", "subwoofer, 70 Hz, 13 dB", [](Fx& f) {
+        f.set(kBassMode, {2}); f.set(kBassFreq, {70}); f.set(kBassGain, {350}); f.set(kBassEnable, {1});
+    });
+    report("clarity", "Clarity enhancer (natural)", "natural, 10 dB", [](Fx& f) {
+        f.set(kClarityMode, {0}); f.set(kClarityGain, {250}); f.set(kClarityEnable, {1});
+    });
+    report("clarity", "Clarity enhancer (OZone+)", "OZone+, 10 dB", [](Fx& f) {
+        f.set(kClarityMode, {1}); f.set(kClarityGain, {250}); f.set(kClarityEnable, {1});
+    });
+    report("clarity", "Clarity enhancer (XHiFi)", "XHiFi, 10 dB", [](Fx& f) {
+        f.set(kClarityMode, {2}); f.set(kClarityGain, {250}); f.set(kClarityEnable, {1});
+    });
+    report("vse", "Spectrum extension", "7.6 kHz, strength 100 %", [](Fx& f) {
+        f.set(kSpectrumExtReference, {7600}); f.set(kSpectrumExtAmount, {560}); f.set(kSpectrumExtEnable, {1});
+    });
+    report("dyn", "Dynamic system", "bass strength 100 %", [](Fx& f) {
+        f.set(kDynamicSystemX, {100, 5600}); f.set(kDynamicSystemY, {40, 80}); f.set(kDynamicSystemSide, {50, 50});
+        f.set(kDynamicSystemStrength, {1100}); f.set(kDynamicSystemEnable, {1});
+    });
+    report("tube", "Tube simulator", "on", [](Fx& f) { f.set(kTubeEnable, {1}); });
+    report("analogx", "AnalogX", "medium", [](Fx& f) { f.set(kAnalogLevel, {1}); f.set(kAnalogEnable, {1}); });
+
+    static const char* kProfiles[] = {"Phone", "Tablet", "Laptop", "Small Bluetooth speaker",
+                                      "Large Bluetooth or home speaker", "Car", "TV"};
+    static int profile = 0;
+    for (profile = 0; profile < 7; ++profile) {
+        const std::string name = std::string("Speaker correction (") + kProfiles[profile] + ")";
+        report("speaker", name.c_str(), "strength 100 %", [](Fx& f) {
+            f.set(kSpeakerProfile, {profile}); f.set(kSpeakerStrength, {100}); f.set(kSpeakerOptimization, {1});
+        });
+    }
+    report("protect", "Speaker protection (phone)", "phone (700 Hz), bass ceiling -12 dB", [](Fx& f) {
+        f.set(kSpeakerProtectResonance, {700}); f.set(kSpeakerProtectLimit, {-1200}); f.set(kSpeakerProtectEnable, {1});
+    }, kDynamics);
+    report("xtc", "Speaker widening", "width 60 %, speakers 15 cm apart, 40 cm away", [](Fx& f) {
+        f.set(kCrosstalkAmount, {60}); f.set(kCrosstalkSpacing, {15}); f.set(kCrosstalkDistance, {40});
+        f.set(kCrosstalkEnable, {1});
+    }, kCrossfeed | kSpatial);
     return 0;
 }

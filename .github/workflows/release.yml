@@ -68,8 +68,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/app/build/outputs/apk/release/app-release.apk "out/ResonanceFX-$GITHUB_REF_NAME.apk"
-          (cd out && sha256sum "ResonanceFX-$GITHUB_REF_NAME.zip" "ResonanceFX-$GITHUB_REF_NAME.apk" > SHA256SUMS.txt)
+          # The engine's own measurements of every effect, as shown in the app.
+          cp app/app/src/main/assets/measurements.json "out/ResonanceFX-$GITHUB_REF_NAME-measurements.json"
+          (cd out && sha256sum "ResonanceFX-$GITHUB_REF_NAME.zip" "ResonanceFX-$GITHUB_REF_NAME.apk"             "ResonanceFX-$GITHUB_REF_NAME-measurements.json" > SHA256SUMS.txt)
           notes="$(awk -v v="## $GITHUB_REF_NAME" '$0 ~ "^## " { p = index($0, v) == 1; next } p' CHANGELOG.md)"
           gh release create "$GITHUB_REF_NAME" --title "ResonanceFX $GITHUB_REF_NAME" \
             --notes "${notes:-See CHANGELOG.md}" \
-            "out/ResonanceFX-$GITHUB_REF_NAME.zip" "out/ResonanceFX-$GITHUB_REF_NAME.apk" out/SHA256SUMS.txt
+            "out/ResonanceFX-$GITHUB_REF_NAME.zip" "out/ResonanceFX-$GITHUB_REF_NAME.apk"             "out/ResonanceFX-$GITHUB_REF_NAME-measurements.json" out/SHA256SUMS.txt

@@ -13,18 +13,28 @@
 
 namespace rfx {
 
-/// Excursion limiter.  Below its resonance a closed-box driver's cone excursion follows the
-/// drive voltage through a second-order low-pass at the system resonance (Small, JAES 20(5),
-/// 1972), so that filter's output predicts excursion.  When the prediction exceeds the limit,
-/// only the band below the crossover (1.4x resonance) is turned down: bass gets cleaner and the
-/// driver stops rattling, while voices and detail keep their level.  A subsonic high-pass at
-/// half the resonance removes content the driver can't reproduce but would still have to move
-/// for.
+/// Speaker protection, in one of two modes.
+///  - Model (default): an excursion limiter.  Below its resonance a closed-box driver's cone
+///    excursion follows the drive voltage through a second-order low-pass at the system
+///    resonance (Small, JAES 20(5), 1972), so that filter's output predicts excursion.  When the
+///    prediction exceeds the limit, only the band below the crossover (1.4x resonance) is turned
+///    down: bass gets cleaner and the driver stops rattling, while voices and detail keep their
+///    level.  A subsonic high-pass at half the resonance removes content the driver can't
+///    reproduce but would still have to move for.
+///  - Measured: per-band ceilings from the user's own distortion measurement (the loudest level
+///    each band played below 5 % THD).  The signal is split into kBands phase-coherent bands and
+///    each band is limited at its own ceiling, so only what actually distorts is held back.
 class SpeakerProtector {
 public:
+    static constexpr int kBands = 5;
+    /// Band edges of the measured mode: below 125 Hz, 125-250, 250-500, 500-1000, above 1 kHz.
+    static constexpr double kCrossovers[kBands - 1] = {125.0, 250.0, 500.0, 1000.0};
+
     struct Settings {
         float resonanceHz = 700.0f;  // driver + enclosure resonance
         float limitDb = -12.0f;      // excursion ceiling, dB re full scale
+        bool measured = false;
+        float ceilingDb[kBands] = {0, 0, 0, 0, 0};  // measured mode: peak level per band (>= 0: no limit)
     };
     void prepare(double sampleRate);
     void reset();
@@ -41,6 +51,10 @@ private:
     LrCrossover xo_;
     double envDb_ = -150.0, gainDb_ = 0.0;
     double envRelease_ = 0.0, gainAttack_ = 0.0, gainRelease_ = 0.0;
+    // Measured mode.
+    void processMeasured(float* left, float* right, int n);
+    LrCrossover bands_;
+    double bandEnvDb_[kBands] = {}, bandGainDb_[kBands] = {};
 };
 
 /// Crosstalk cancellation for a speaker pair a few centimetres apart (phone, tablet, laptop,
@@ -56,6 +70,7 @@ public:
         float amount = 0.5f;       // 0..1
         float spacingCm = 15.0f;   // distance between the two speakers
         float distanceCm = 40.0f;  // listener distance from the speakers
+        float orientation = 1.0f;  // 0..1: fades the effect when the speakers aren't left and right of the listener
     };
     void prepare(double sampleRate);
     void reset();

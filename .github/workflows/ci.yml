@@ -36,6 +36,8 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends busybox
           bash tests/test-patch.sh "busybox sh"
+      - name: Module action diagnostics
+        run: bash tests/test-action.sh
       - name: Engine host tests (ASan/UBSan)
         run: bash tests/run-engine-tests.sh
 

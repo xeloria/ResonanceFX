@@ -60,6 +60,7 @@ class EngineService : LifecycleService() {
     private var lastSampleRate = 0
     private lateinit var volume: VolumeWatcher
     private lateinit var headTracker: HeadTracker
+    private lateinit var orientation: OrientationWatcher
 
     // Manifest receivers don't get implicit broadcasts on Android 8+; while we run, listen here.
     private val sessionReceiver = SessionReceiver()
@@ -87,6 +88,7 @@ class EngineService : LifecycleService() {
         engine = sessions
         engineApplier = applier
         bypassHook = { on -> lifecycleScope.launch(engineThread) { sessions.setBypass(on) } }
+        instance = this
         startInForeground()
 
         audio.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
@@ -107,6 +109,9 @@ class EngineService : LifecycleService() {
             }
         }
         headTracker = HeadTracker(this) { yaw -> lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.SPATIAL_YAW, yaw) } }
+        orientation = OrientationWatcher(this) { sideways ->
+            lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.CROSSTALK_ORIENTATION, if (sideways) 100 else 0) }
+        }
         // Only listen while the module that uses the measurement is on.
         lifecycleScope.launch {
             repository.settings.collect { s ->
@@ -116,6 +121,7 @@ class EngineService : LifecycleService() {
                 if ((s.bool("loud.enable") && s.int("loud.mode") == 0) || levelModules.any { s.bool(it) }) volume.start()
                 else volume.stop()
                 headTracker.setEnabled(s.bool("spatial.enable") && s.bool("spatial.tracking"))
+                updateOrientation(s, repository.route.value)
             }
         }
 
@@ -178,6 +184,7 @@ class EngineService : LifecycleService() {
         audio.unregisterAudioDeviceCallback(deviceCallback)
         volume.stop()
         headTracker.setEnabled(false)
+        orientation.setEnabled(false)
         unregisterReceiver(sessionReceiver)
         // Release synchronously on the engine thread: a leaked AudioEffect keeps processing
         // after we're gone.
@@ -185,7 +192,15 @@ class EngineService : LifecycleService() {
         running.value = false
         engine = null
         bypassHook = null
+        instance = null
         super.onDestroy()
+    }
+
+    /** Speaker widening follows how the device is held, but only on its own speakers. */
+    private fun updateOrientation(s: io.github.resonancefx.data.Settings, route: Route) {
+        val follow = s.bool("xtc.enable") && s.bool(Catalog.KEY_XTC_SIDEWAYS) && route == Route.SPEAKER
+        orientation.setEnabled(follow)
+        if (!follow) lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.CROSSTALK_ORIENTATION, 100) }
     }
 
     private fun refreshRoute() {
@@ -193,6 +208,7 @@ class EngineService : LifecycleService() {
         val changed = route != repository.route.value
         repository.onRouteChanged(route)
         if (changed) lifecycleScope.launch(engineThread) { sessions.reapply() }
+        if (::orientation.isInitialized) updateOrientation(repository.settings.value, route)
     }
 
     private fun startInForeground() {
@@ -240,6 +256,13 @@ class EngineService : LifecycleService() {
         @Volatile var engineApplier: Applier? = null
             private set
         @Volatile private var bypassHook: ((Boolean) -> Unit)? = null
+        @Volatile private var instance: EngineService? = null
+
+        /** Runs [block] on the engine thread; null when the service isn't running. */
+        suspend fun <T> onEngine(block: (SessionManager) -> T): T? {
+            val service = instance ?: return null
+            return withContext(service.engineThread) { block(service.sessions) }
+        }
 
         /** Pauses effects (for a speaker measurement) or restores them. */
         fun setBypass(on: Boolean) {

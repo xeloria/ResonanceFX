@@ -6,6 +6,8 @@ package io.github.resonancefx.data
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.edit
+import io.github.resonancefx.model.Catalog
+import io.github.resonancefx.model.Composite
 import io.github.resonancefx.model.FileControl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +62,7 @@ class Repository(private val context: Context) {
     val activeProfileName: String get() = if (perDeviceProfiles) _route.value.label else "All outputs"
 
     fun onRouteChanged(route: Route) {
+        rememberLabel(route)
         if (route == _route.value) return
         flushSave()
         _route.value = route
@@ -132,6 +135,32 @@ class Repository(private val context: Context) {
     private fun listPresets() = presetsDir.listFiles { f -> f.extension == "json" }.orEmpty()
         .mapNotNull { runCatching { JSONObject(it.readText()).optString("name") }.getOrNull()?.ifBlank { null } }
         .sortedBy { it.lowercase() }
+
+    // ---- Speaker measurements of other outputs -------------------------------------------------
+
+    /** A measured speaker in another profile, for "sound like". [key] identifies its profile. */
+    data class MeasuredSpeaker(val key: String, val label: String, val measurement: Composite.Measurement)
+
+    fun otherMeasurements(): List<MeasuredSpeaker> {
+        val current = fileName(profileKey(_route.value))
+        val labels = labels()
+        return profilesDir.listFiles { f -> f.extension == "json" && f.name != current }.orEmpty().mapNotNull { file ->
+            val settings = runCatching { Settings.fromJson(JSONObject(file.readText())) }.getOrNull() ?: return@mapNotNull null
+            val m = Composite.parseMeasurement(settings.string(Catalog.KEY_SPEAKER_MEASURED)) ?: return@mapNotNull null
+            MeasuredSpeaker(file.name, labels.optString(file.name, file.nameWithoutExtension), m)
+        }.sortedBy { it.label.lowercase() }
+    }
+
+    fun measurementOf(key: String): Composite.Measurement? = otherMeasurements().firstOrNull { it.key == key }?.measurement
+
+    private fun labels() = runCatching { JSONObject(prefs.getString("profile_labels", "{}")!!) }.getOrDefault(JSONObject())
+
+    private fun rememberLabel(route: Route) {
+        val labels = labels()
+        val file = fileName(route.key)
+        if (labels.optString(file) == route.label) return
+        prefs.edit { putString("profile_labels", labels.put(file, route.label).toString()) }
+    }
 
     // ---- Imported assets (DDC profiles, impulse responses) -----------------------------------
 

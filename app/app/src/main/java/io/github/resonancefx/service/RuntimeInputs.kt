@@ -61,27 +61,9 @@ class VolumeWatcher(private val context: Context, private val onVolume: (db: Int
         if (registered) onVolume((currentDb() * 100).roundToInt().coerceIn(-12000, 0), outputType() in softwareVolume)
     }
 
-    private fun currentDb(): Float {
-        val stream = AudioManager.STREAM_MUSIC
-        val index = audio.getStreamVolume(stream)
-        val max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
-        if (index <= 0) return -120f
-        if (Build.VERSION.SDK_INT >= 28) {
-            runCatching { audio.getStreamVolumeDb(stream, index, outputType()) }.getOrNull()
-                ?.takeIf { it.isFinite() && it <= 0f }?.let { return it }
-        }
-        // Typical Android media curve: about 60 dB across the steps, steeper at the bottom.
-        val x = index.toFloat() / max
-        return (40f * log10(x)).coerceAtLeast(-60f)
-    }
+    private fun currentDb(): Float = volumeDb(audio)
 
-    private fun outputType(): Int {
-        val outputs = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
-        return listOf(
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-            AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE,
-        ).firstOrNull { it in outputs } ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-    }
+    private fun outputType(): Int = outputType(audio)
 
     companion object {
         /**
@@ -90,12 +72,80 @@ class VolumeWatcher(private val context: Context, private val onVolume: (db: Int
          * Bluetooth devices normally set their volume themselves (absolute volume) and get the
          * full-level mix.
          */
+        /** The music volume in dBFS (-120 when muted). */
+        fun volumeDb(audio: AudioManager): Float {
+            val stream = AudioManager.STREAM_MUSIC
+            val index = audio.getStreamVolume(stream)
+            val max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+            if (index <= 0) return -120f
+            if (Build.VERSION.SDK_INT >= 28) {
+                runCatching { audio.getStreamVolumeDb(stream, index, outputType(audio)) }.getOrNull()
+                    ?.takeIf { it.isFinite() && it <= 0f }?.let { return it }
+            }
+            // Typical Android media curve: about 60 dB across the steps, steeper at the bottom.
+            val x = index.toFloat() / max
+            return (40f * log10(x)).coerceAtLeast(-60f)
+        }
+
+        /** The gain Android applied to the mix before the effects: the volume, or 0 dB where the device sets it. */
+        fun levelOffsetDb(audio: AudioManager): Float = if (outputType(audio) in softwareVolume) volumeDb(audio) else 0f
+
+        private fun outputType(audio: AudioManager): Int {
+            val outputs = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
+            return listOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE,
+            ).firstOrNull { it in outputs } ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        }
+
         private val softwareVolume = setOf(
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET,
             AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE,
         )
         private const val ACTION_VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION"
         private const val EXTRA_STREAM_TYPE = "android.media.EXTRA_VOLUME_STREAM_TYPE"
+    }
+}
+
+/**
+ * Whether the device is held sideways (the display is wider than tall). Phone and tablet speakers
+ * sit left and right of the listener only then; held upright they are above and below each other.
+ */
+class OrientationWatcher(context: Context, private val onSideways: (Boolean) -> Unit) {
+    private val displays = context.getSystemService(android.hardware.display.DisplayManager::class.java)
+    private val handler = Handler(Looper.getMainLooper())
+    private var listening = false
+    private var last: Boolean? = null
+
+    private val listener = object : android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == android.view.Display.DEFAULT_DISPLAY) report()
+        }
+    }
+
+    fun setEnabled(on: Boolean) {
+        if (on == listening) return
+        listening = on
+        if (on) {
+            displays.registerDisplayListener(listener, handler)
+            last = null
+            report()
+        } else {
+            displays.unregisterDisplayListener(listener)
+        }
+    }
+
+    private fun report() {
+        val display = displays.getDisplay(android.view.Display.DEFAULT_DISPLAY) ?: return
+        val size = android.graphics.Point()
+        @Suppress("DEPRECATION") display.getRealSize(size)
+        val sideways = size.x > size.y
+        if (sideways != last) {
+            last = sideways
+            onSideways(sideways)
+        }
     }
 }
 

@@ -61,20 +61,50 @@ object Composite {
         val responseDb: List<Float>,
         val lowHz: Float,
         val highHz: Float,
+        val distortion: Distortion? = null,
     )
+
+    /**
+     * Where the speaker starts to distort, per band of the engine's measured protection: the
+     * loudest sweep level (dBFS) each band played below 5 % THD, or null if it stayed clean at
+     * every level tried. [volumeDb] is the gain Android applied before the effects at the time
+     * (the volume on the phone's speaker, 0 dB on Bluetooth), turning those levels into what the
+     * engine sees.
+     */
+    data class Distortion(val volumeDb: Float, val cleanUpToDb: List<Float?>) {
+        /** Engine ceilings (dBFS peak, 0 = no limit) for the measured protection mode. */
+        fun ceilings(): FloatArray = FloatArray(cleanUpToDb.size) { i ->
+            cleanUpToDb[i]?.let { (it + volumeDb).coerceIn(-60f, -0.1f) } ?: 0f
+        }
+    }
 
     fun parseMeasurement(value: String): Measurement? {
         val parts = value.split('|')
-        if (parts.size != 3) return null
+        if (parts.size != 3 && parts.size != 4) return null
         val head = parts[0].split(';').map { it.toFloatOrNull() ?: return null }
         if (head.size != 3) return null
         val response = parts[2].split(',').map { it.toFloatOrNull() ?: return null }
-        return Measurement(head[0].coerceIn(-24f, 0f), parseBands(parts[1]), response, head[1], head[2])
+        val distortion = parts.getOrNull(3)?.split(';')?.let { d ->
+            val volume = d.firstOrNull()?.toFloatOrNull() ?: return null
+            Distortion(volume, d.drop(1).map { it.toFloatOrNull() })
+        }
+        return Measurement(head[0].coerceIn(-24f, 0f), parseBands(parts[1]), response, head[1], head[2], distortion)
     }
 
     fun formatMeasurement(m: Measurement): String =
         String.format(Locale.ROOT, "%.2f;%.0f;%.0f", m.preampDb, m.lowHz, m.highHz) + "|" + formatBands(m.bands) + "|" +
-            m.responseDb.joinToString(",") { String.format(Locale.ROOT, "%.1f", it) }
+            m.responseDb.joinToString(",") { String.format(Locale.ROOT, "%.1f", it) } +
+            (m.distortion?.let { d ->
+                "|" + String.format(Locale.ROOT, "%.1f", d.volumeDb) + ";" +
+                    d.cleanUpToDb.joinToString(";") { c -> c?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "-" }
+            } ?: "")
+
+    /** The measured-protection ceilings payload, or null without a distortion measurement. */
+    fun protectionCeilings(value: String): ByteArray? {
+        val d = parseMeasurement(value)?.distortion ?: return null
+        val c = d.ceilings()
+        return Codec.floatArray(c.size, c)
+    }
 
     /** The measured correction as the engine's EQ payload (empty without a measurement). */
     fun speakerCorrection(value: String): ByteArray {

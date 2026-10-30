@@ -8,8 +8,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Driver version reported through the version getters.
-set(RFX_VERSION_CODE 20100 CACHE STRING "Driver version code")
-set(RFX_VERSION_NAME "2.1.0" CACHE STRING "Driver version name")
+set(RFX_VERSION_CODE 20200 CACHE STRING "Driver version code")
+set(RFX_VERSION_NAME "2.2.0" CACHE STRING "Driver version name")
 
 # The engine: ResonanceFX processors + the shared DSP core + the Android effect glue.
 file(GLOB_RECURSE RFX_SOURCES CONFIGURE_DEPENDS

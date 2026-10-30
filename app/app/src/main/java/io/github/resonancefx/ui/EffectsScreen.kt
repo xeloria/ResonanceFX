@@ -73,6 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.resonancefx.App
 import io.github.resonancefx.data.Settings
 import io.github.resonancefx.driver.DriverStatus
+import io.github.resonancefx.driver.Params
 import io.github.resonancefx.model.AutoEqControl
 import io.github.resonancefx.model.BandsControl
 import io.github.resonancefx.model.GraphicEqControl
@@ -97,6 +98,7 @@ fun EffectsScreen() {
     val settings by repo.settings.collectAsStateWithLifecycle()
     val route by repo.route.collectAsStateWithLifecycle()
     var showAdvanced by rememberSaveable { mutableStateOf(false) }
+    var blindTest by remember { mutableStateOf(false) }
     val status = rememberDriverStatus()
     val context = LocalContext.current
 
@@ -120,6 +122,10 @@ fun EffectsScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = showAdvanced, onClick = { showAdvanced = !showAdvanced }, label = { Text("Advanced modules") })
                 FilterChip(selected = false, onClick = {}, enabled = false, label = { Text(route.label) })
+                val abx = status?.features?.let { it and Params.FEATURE_ABX != 0 } == true
+                if (abx && settings.bool(Catalog.KEY_MASTER)) {
+                    FilterChip(selected = blindTest, onClick = { blindTest = true }, label = { Text("Blind test") })
+                }
             }
         }
         // Until the engine reports its features (not attached yet), show everything.
@@ -132,6 +138,7 @@ fun EffectsScreen() {
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+    if (blindTest) AbxDialog(settings, status?.features ?: 0) { blindTest = false }
 }
 
 /** Polls the driver while the screen is visible. */
@@ -280,14 +287,21 @@ private fun ControlRow(control: Control, settings: Settings, onChange: (String, 
         is MeasureControl -> MeasureRow(
             settings.string(control.key),
             usingMeasured = settings.int(Catalog.KEY_SPEAKER_PROFILE) == Catalog.PROFILE_MEASURED,
+            match = settings.string(control.matchKey),
             onSave = {
                 onChange(control.key, it)
+                onChange(control.matchKey, "")
                 onChange(Catalog.KEY_SPEAKER_PROFILE, Catalog.PROFILE_MEASURED)
                 onChange(Catalog.KEY_SPEAKER_ENABLE, true)
+            },
+            onMatch = { reference, refitted ->
+                onChange(control.key, refitted)
+                onChange(control.matchKey, reference)
             },
             onUse = { onChange(Catalog.KEY_SPEAKER_PROFILE, Catalog.PROFILE_MEASURED) },
             onDelete = {
                 onChange(control.key, "")
+                onChange(control.matchKey, "")
                 if (settings.int(Catalog.KEY_SPEAKER_PROFILE) == Catalog.PROFILE_MEASURED) onChange(Catalog.KEY_SPEAKER_PROFILE, 0)
             },
         )

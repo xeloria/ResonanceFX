@@ -61,8 +61,7 @@ class Applier(
                     fx.set(section.enableParam!!, settings.bool(key))
                     composed += section
                 }
-                key in Catalog.composites -> {
-                    val section = Catalog.composites.getValue(key)
+                key in Catalog.composites -> Catalog.composites.getValue(key).forEach { section ->
                     if (composed.add(section)) section.compose!!(fx, settings)
                 }
                 else -> Catalog.controlsByKey[key]?.let { (_, control) -> applyControl(fx, control, settings) }

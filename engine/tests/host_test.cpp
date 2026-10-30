@@ -535,6 +535,23 @@ static void testSpeakerModules() {
         CHECK(fabs(mid) < 0.5, "protection changed 3 kHz by %.2f dB", mid);
         // Only the subsonic high-pass (100 Hz) acts on quiet bass: about -0.8 dB at 150 Hz.
         CHECK(fabs(quiet) < 1.5, "protection changed quiet 150 Hz by %.2f dB", quiet);
+        // Measured mode: only the bass band (below 125 Hz) is limited, at -20 dBFS.
+        std::vector<uint8_t> payload(1024, 0);
+        const uint32_t bands = 5;
+        const float ceilings[5] = {-20.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+        memcpy(payload.data(), &bands, 4);
+        memcpy(payload.data() + 4, ceilings, sizeof(ceilings));
+        CHECK(fx.setParam(kSpeakerProtectCeilings, payload.data(), payload.size()) == 0, "ceilings accepted");
+        fx.set(kSpeakerProtectMode, {1});
+        const double low = measureGainDbAt(fx, 60, 48000, 0.5f, false) - measureGainDbAt(fx, 60, 48000, 0.01f, false);
+        const double high = measureGainDbAt(fx, 2000, 48000, 0.5f, false) - midBase;
+        // A -6 dBFS 60 Hz tone held at -20 dBFS: about -14 dB relative to a quiet one.
+        CHECK(low < -11.0 && low > -16.0, "measured protection at 60 Hz: %.2f dB, expected about -14", low);
+        CHECK(fabs(high) < 0.5, "measured protection changed 2 kHz by %.2f dB", high);
+        uint32_t wrong = 4;
+        memcpy(payload.data(), &wrong, 4);
+        CHECK(fx.setParam(kSpeakerProtectCeilings, payload.data(), payload.size()) != 0, "wrong band count must fail");
+        fx.set(kSpeakerProtectMode, {0});
     }
     {
         // Crosstalk cancellation: the centre stays as it is, the side is lifted, and the
@@ -554,6 +571,11 @@ static void testSpeakerModules() {
         const double side = measureGainDbAt(fx, 1000, 48000, 0.1f, true) - sideBase;
         CHECK(fabs(mid) < 0.1, "crosstalk cancellation changed the centre by %.2f dB", mid);
         CHECK(side > 3.0, "crosstalk cancellation side gain %.2f dB, expected a lift", side);
+        // Held upright the speakers are above and below the listener: the effect fades out.
+        fx.set(kCrosstalkOrientation, {0});
+        const double upright = measureGainDbAt(fx, 1000, 48000, 0.1f, true) - sideBase;
+        CHECK(fabs(upright) < 0.2, "crosstalk cancellation upright: side %.2f dB, expected 0", upright);
+        fx.set(kCrosstalkOrientation, {100});
         uint32_t seed = 1;
         bool bounded = true;
         for (int block = 0; block < 2000; block++) {
@@ -658,6 +680,119 @@ static void testPlaybackGain() {
     }
 }
 
+// Plays `seconds` of the stereo signal gen(i) (i = running sample index) and returns the
+// output of the last block; *first receives the sample index that block started at.
+template <class Gen>
+static std::vector<float> playFor(Fx &fx, double seconds, Gen gen, long *first = nullptr) {
+    const int frames = 480, blocks = std::max(1, (int) (seconds * 48000 / frames));
+    static long index = 0;
+    std::vector<float> in(frames * 2), out(frames * 2);
+    for (int block = 0; block < blocks; block++) {
+        if (first) *first = index;
+        for (int i = 0; i < frames; i++, index++) { float v[2]; gen(index, v); in[i * 2] = v[0]; in[i * 2 + 1] = v[1]; }
+        audio_buffer_t ib{(size_t) frames, {in.data()}}, ob{(size_t) frames, {out.data()}};
+        fx.process(&ib, &ob);
+    }
+    return out;
+}
+
+static double rmsDb(const std::vector<float> &x) {
+    double e = 0;
+    for (float v : x) e += v * v;
+    return 10 * log10(e / x.size() + 1e-30);
+}
+
+static void abxChainSetup(Fx &fx) {
+    fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+    fx.simple(EFFECT_CMD_ENABLE);
+    fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+    fx.set(PARAM_GATE_LIMIT, {100});
+}
+
+static void testListeningTest() {
+    auto tone = [](long i, float *v) { v[0] = v[1] = 0.1f * (float) sin(2 * M_PI * 1000.0 * i / 48000); };
+    {
+        Fx fx;
+        abxChainSetup(fx);
+        uint32_t features = 0; fx.get(PARAM_GET_FEATURES, &features, 4);
+        CHECK(features & kFeatureAbx, "features must advertise the listening test");
+        CHECK(fx.getInt(kGetAbxDelta) == kAbxNotReady, "no loudness difference before a test");
+        // The chain under test: +6 dB at 1 kHz.
+        setPeq(fx, 0.0f, {{0, 1000, 6, 1.4f}});
+        fx.set(PARAM_PARAMETRIC_EQ_ENABLE, {1});
+        fx.set(kAbxMode, {1});
+        fx.set(kAbxSelect, {1});
+        playFor(fx, 4.0, tone);
+        const int32_t delta = fx.getInt(kGetAbxDelta);
+        CHECK(abs(delta - 600) < 30, "chain loudness difference %d (x100 dB), expected +6 dB", delta);
+        // Both renderings now play at the same level.
+        const double b = rmsDb(playFor(fx, 0.5, tone));
+        fx.set(kAbxSelect, {0});
+        const double a = rmsDb(playFor(fx, 0.5, tone));
+        CHECK(fabs(a - b) < 0.2, "A %.2f dB vs B %.2f dB: not level matched", a, b);
+        fx.set(kAbxMode, {0});
+        CHECK(fx.getInt(kGetAbxDelta) == kAbxNotReady, "no loudness difference once the test ended");
+    }
+    {
+        // Timing: the chain's latency (the compressor's clip guard, 31 samples, with nothing to
+        // compress) must be matched in A, or switching would shift the music in time.
+        auto noise = [](long i, float *v) {
+            uint32_t s = (uint32_t) i * 2654435761u + 12345u;
+            s ^= s >> 13; s *= 0x5bd1e995u; s ^= s >> 15;
+            v[0] = v[1] = 0.05f * ((s >> 8) / 8388608.0f - 1.0f);
+        };
+        auto bestDelay = [&](const std::vector<float> &out, long first) {
+            int best = -1;
+            double bestErr = 1e30;
+            for (int d = 0; d < 300; d++) {
+                double err = 0;
+                for (size_t i = 0; i < out.size() / 2; i++) {
+                    float v[2]; noise(first + (long) i - d, v);
+                    err += (out[i * 2] - v[0]) * (out[i * 2] - v[0]);
+                }
+                if (err < bestErr) { bestErr = err; best = d; }
+            }
+            return best;
+        };
+        Fx fx;
+        abxChainSetup(fx);
+        fx.set(kCompThreshold, {100});
+        fx.set(kCompRatio, {0});
+        fx.set(kCompAutoGain, {0});
+        fx.set(kCompEnable, {1});
+        fx.set(kAbxMode, {1});
+        long first = 0;
+        fx.set(kAbxSelect, {1});
+        const std::vector<float> outB = playFor(fx, 0.5, noise, &first);
+        const int dB = bestDelay(outB, first);
+        fx.set(kAbxSelect, {0});
+        const std::vector<float> outA = playFor(fx, 0.5, noise, &first);
+        const int dA = bestDelay(outA, first);
+        // The limiter (80 samples, in both) plus the clip guard's oversampling.
+        CHECK(dB > 80 && dA == dB, "B is %d samples late, A %d: renderings not aligned", dB, dA);
+    }
+    {
+        // Testing one effect: the reference keeps the rest of the chain.
+        Fx fx;
+        abxChainSetup(fx);
+        setPeq(fx, 0.0f, {{0, 1000, 6, 1.4f}});
+        fx.set(PARAM_PARAMETRIC_EQ_ENABLE, {1});
+        fx.set(PARAM_GATE_OUTPUT_VOLUME, {50});  // the output gain stays in both: no difference
+        fx.set(kAbxExclude, {PARAM_PARAMETRIC_EQ_ENABLE});
+        fx.set(kAbxMode, {1});
+        playFor(fx, 4.0, tone);
+        const int32_t one = fx.getInt(kGetAbxDelta);
+        CHECK(abs(one - 600) < 30, "excluding the parametric EQ: difference %d (x100 dB), expected +6 dB", one);
+        // With the effect off in the chain too, A and B are the same.
+        fx.set(PARAM_PARAMETRIC_EQ_ENABLE, {0});
+        fx.set(kAbxMode, {0});
+        fx.set(kAbxMode, {1});
+        playFor(fx, 4.0, tone);
+        const int32_t none = fx.getInt(kGetAbxDelta);
+        CHECK(abs(none) < 10, "effect off in both: difference %d (x100 dB), expected 0", none);
+    }
+}
+
 static void testConcurrentCommands() {
     // Binder thread hammers parameters/config while the audio thread processes: must never crash
     // or block (process() only try_locks).
@@ -704,6 +839,7 @@ int main() {
     testParametricEq();
     testSpeakerModules();
     testPlaybackGain();
+    testListeningTest();
     testConcurrentCommands();
     if (failures == 0) printf("All engine tests passed\n");
     else printf("%d engine test failure(s)\n", failures);

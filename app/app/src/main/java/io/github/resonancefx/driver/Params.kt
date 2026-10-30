@@ -28,6 +28,8 @@ object Params {
     const val GET_ARCHITECTURE = 11
     const val GET_CHANNEL_COUNT = 12 // ResonanceFX engine only
     const val GET_FEATURES = 13 // ResonanceFX engine only: bitmask of FEATURE_*
+    const val GET_ABX_DELTA = 14 // listening test: loudness of B minus A, dB x100, or ABX_NOT_READY
+    const val ABX_NOT_READY = Int.MIN_VALUE
 
     const val FEATURE_CHANNEL_COUNT = 0x1
     const val FEATURE_PARAMETRIC_EQ = 0x2
@@ -44,6 +46,8 @@ object Params {
     const val FEATURE_SPEAKER_PROTECTION = 0x1000
     const val FEATURE_CROSSTALK = 0x2000
     const val FEATURE_LEVEL_OFFSET = 0x4000
+    const val FEATURE_ABX = 0x8000
+    const val FEATURE_MEASURED_PROTECTION = 0x10000
 
     // Setters outside the effect range
     /** 1 = timestamp every processed buffer so GET_STREAMING works. */
@@ -205,14 +209,23 @@ object Params {
     const val SPEAKER_PROTECT_ENABLE = 65775
     const val SPEAKER_PROTECT_RESONANCE = 65776 // Hz
     const val SPEAKER_PROTECT_LIMIT = 65777     // dB x100
+    const val SPEAKER_PROTECT_CEILINGS = 65778  // [5][dBFS peak per band], measured mode
+    const val SPEAKER_PROTECT_MODE = 65779      // 0 excursion model, 1 measured ceilings
 
     const val CROSSTALK_ENABLE = 65780
     const val CROSSTALK_AMOUNT = 65781     // %
     const val CROSSTALK_SPACING = 65782    // cm
     const val CROSSTALK_DISTANCE = 65783   // cm
+    const val CROSSTALK_ORIENTATION = 65784 // % of the width applied, runtime (device orientation)
 
     const val AGC_MAX_CUT = 65785          // dB x100; 0 = only lift quiet programme
     const val INPUT_LEVEL_OFFSET = 65786   // dB x100, runtime: volume Android applied before us
+
+    // Blind listening test: MODE 1 runs it; EXCLUDE is the enable id of the effect under test
+    // (0 = all effects); SELECT 0 plays A (reference), 1 plays B (the chain as set).
+    const val ABX_MODE = 65790
+    const val ABX_EXCLUDE = 65791
+    const val ABX_SELECT = 65792
 
     // Payload sizes the engine accepts for array parameters.
     const val DDC_PAYLOAD_BYTES = 1024

@@ -110,6 +110,9 @@ uint32_t alignedParamSize(uint32_t psize) { return (psize + 3u) & ~3u; }
 EffectContext::EffectContext() {
     left_.assign(Engine::kMaxBlock, 0.0f);
     right_.assign(Engine::kMaxBlock, 0.0f);
+    refLeft_.assign(Engine::kMaxBlock, 0.0f);
+    refRight_.assign(Engine::kMaxBlock, 0.0f);
+    reference_.setModulesOff(true);
 }
 
 void EffectContext::disable(Disable reason, std::string message) {
@@ -139,8 +142,14 @@ void EffectContext::configure(const effect_config_t& cfg) {
         return disable(Disable::kFormat, "Unsupported sample format");
 
     channels_ = ch;
-    if (std::fabs(engine_.sampleRate() - in.samplingRate) > 0.5) engine_.prepare(in.samplingRate);
-    else engine_.reset();
+    if (std::fabs(engine_.sampleRate() - in.samplingRate) > 0.5) {
+        engine_.prepare(in.samplingRate);
+        reference_.prepare(in.samplingRate);
+        abx_.prepare(in.samplingRate);
+    } else {
+        engine_.reset();
+        reference_.reset();
+    }
     disable(Disable::kNone, "");
     RFX_LOGI("Configured: %u channels at %u Hz", ch, in.samplingRate);
 }
@@ -170,6 +179,7 @@ int32_t EffectContext::command(uint32_t code, uint32_t size, void* data, uint32_
             RFX_LOGI("diag cmd RESET");
 #endif
             engine_.reset();
+            reference_.reset();
             replyStatus(0);
             return 0;
         case EFFECT_CMD_ENABLE:
@@ -179,7 +189,10 @@ int32_t EffectContext::command(uint32_t code, uint32_t size, void* data, uint32_
 #ifdef RFX_DIAG
             RFX_LOGI("diag cmd %s", enabled_ ? "ENABLE" : "DISABLE");
 #endif
-            if (enabled_) engine_.reset();
+            if (enabled_) {
+                engine_.reset();
+                reference_.reset();
+            }
             replyStatus(0);
             return 0;
         case EFFECT_CMD_SET_PARAM: {
@@ -212,7 +225,60 @@ int32_t EffectContext::setParameter(const effect_param_t* p, uint32_t cmdSize) {
     if (static_cast<uint64_t>(sizeof(effect_param_t)) + valueOffset + p->vsize > cmdSize) return -EINVAL;
     int32_t id;
     std::memcpy(&id, p->data, sizeof(id));
-    return engine_.setParameter(id, reinterpret_cast<const uint8_t*>(p->data) + valueOffset, p->vsize);
+    const auto* value = reinterpret_cast<const uint8_t*>(p->data) + valueOffset;
+    if (id == kAbxMode || id == kAbxExclude || id == kAbxSelect) {
+        if (p->vsize < sizeof(int32_t)) return -EINVAL;
+        int32_t v;
+        std::memcpy(&v, value, sizeof(v));
+        return setAbx(id, v);
+    }
+    const int32_t status = engine_.setParameter(id, value, p->vsize);
+    if (status != 0) return status;
+    if (p->vsize >= sizeof(int32_t) && p->vsize <= 16) {
+        int32_t first;
+        std::memcpy(&first, value, sizeof(first));
+        lastScalar_[id] = first;
+        if (id == abxExclude_) {
+            const int32_t off = 0;  // the effect under test stays off in the reference
+            reference_.setParameter(id, reinterpret_cast<const uint8_t*>(&off), sizeof(off));
+            return status;
+        }
+    }
+    reference_.setParameter(id, value, p->vsize);
+    return status;
+}
+
+int32_t EffectContext::setAbx(int32_t id, int32_t v) {
+    switch (id) {
+        case kAbxMode:
+            if ((v != 0) != abxOn_) {
+                abxOn_ = v != 0;
+                if (abxOn_) {
+                    reference_.reset();
+                    abx_.prepare(engine_.sampleRate());
+                }
+            }
+            return 0;
+        case kAbxSelect: abx_.select(v != 0); return 0;
+        case kAbxExclude: {
+            if (v == abxExclude_) return 0;
+            // Restore the previously excluded effect in the reference.
+            if (abxExclude_ != 0) {
+                const auto it = lastScalar_.find(abxExclude_);
+                const int32_t prev = it != lastScalar_.end() ? it->second : 0;
+                reference_.setParameter(abxExclude_, reinterpret_cast<const uint8_t*>(&prev), sizeof(prev));
+            }
+            abxExclude_ = v;
+            reference_.setModulesOff(v == 0);
+            if (v != 0) {
+                const int32_t off = 0;
+                reference_.setParameter(v, reinterpret_cast<const uint8_t*>(&off), sizeof(off));
+            }
+            abx_.reset();
+            return 0;
+        }
+        default: return -EINVAL;
+    }
 }
 
 int32_t EffectContext::getParameter(const effect_param_t* p, effect_param_t* reply, uint32_t* replySize) {
@@ -273,13 +339,16 @@ int32_t EffectContext::getParameter(const effect_param_t* p, effect_param_t* rep
         }
         case kGetArchitecture: return put(RFX_ARCH, sizeof(RFX_ARCH) - 1);
         case kGetChannelCount: return putInt(static_cast<int32_t>(channels_));
+        case kGetAbxDelta:
+            return putInt(abxOn_ && abx_.measured() ? static_cast<int32_t>(std::lround(abx_.deltaDb() * 100.0)) : kAbxNotReady);
         case kGetFeatures:
             return putInt(static_cast<int32_t>(kFeatureChannelCount | kFeatureParametricEq | kFeatureLoudness |
                                                kFeatureUserEq | kFeatureGraphicEq | kFeatureMultiband |
                                                kFeatureDynamicEq | kFeatureDeEsser | kFeatureVocal | kFeatureSpatial |
                                                kFeatureTrueStereoKernel | kFeatureSpeakerProfiles |
                                                kFeatureSpeakerProtection | kFeatureCrosstalk |
-                                               kFeatureLevelOffset));
+                                               kFeatureLevelOffset | kFeatureAbx |
+                                               kFeatureMeasuredProtection));
         default:
             return -EINVAL;
     }
@@ -358,7 +427,16 @@ int32_t EffectContext::process(audio_buffer_t* in, audio_buffer_t* out) {
         audio_buffer_t inPart{static_cast<size_t>(n), {static_cast<uint8_t*>(in->raw) + inOffset}};
         audio_buffer_t outPart{static_cast<size_t>(n), {static_cast<uint8_t*>(out->raw) + outOffset}};
         readInput(&inPart, n);
-        engine_.process(left_.data(), right_.data(), n);
+        if (abxOn_) {
+            std::copy_n(left_.data(), n, refLeft_.data());
+            std::copy_n(right_.data(), n, refRight_.data());
+            engine_.process(left_.data(), right_.data(), n);
+            reference_.process(refLeft_.data(), refRight_.data(), n);
+            abx_.process(refLeft_.data(), refRight_.data(), reference_.latency(), left_.data(), right_.data(),
+                         engine_.latency(), n);
+        } else {
+            engine_.process(left_.data(), right_.data(), n);
+        }
         writeOutput(&inPart, &outPart, n, accumulate);
     }
     return 0;

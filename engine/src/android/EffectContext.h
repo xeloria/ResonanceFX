@@ -3,11 +3,13 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include "../Engine.h"
+#include "../fx/Abx.h"
 #include "android_effect_abi.h"
 
 namespace rfx::android {
@@ -37,8 +39,18 @@ private:
     void writeOutput(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate);
     void passThrough(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate);
 
+    int32_t setAbx(int32_t id, int32_t value);
+
     std::mutex mutex_;
     Engine engine_;
+    // Listening test: the reference rendering receives every parameter (with the effect under
+    // test forced off) but only processes while a test runs.
+    Engine reference_;
+    fx::AbxSwitch abx_;
+    bool abxOn_ = false;
+    int32_t abxExclude_ = 0;
+    std::map<int32_t, int32_t> lastScalar_;  // first int of every scalar parameter, to restore exclusions
+    std::vector<float> refLeft_, refRight_;
     effect_config_t config_{};
     uint32_t channels_ = 2;
     bool enabled_ = false;

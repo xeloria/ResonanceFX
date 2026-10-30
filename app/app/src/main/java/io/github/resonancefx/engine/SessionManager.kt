@@ -77,6 +77,14 @@ class SessionManager(private val applier: Applier) {
         effects.values.forEach { (_, fx) -> runSafely { fx.set(param, value) } }
     }
 
+    /** Listening-test control, sent to every instance (see Params.ABX_*). */
+    fun abx(param: Int, value: Int) {
+        effects.values.forEach { (_, fx) -> runSafely { fx.set(param, value) } }
+    }
+
+    /** Loudness of B minus A in dB x100, [Params.ABX_NOT_READY] until measured, null if detached. */
+    fun abxDelta(): Int? = primary?.getInt(Params.GET_ABX_DELTA)
+
     /** Pauses every instance (true) or restores the master switch (false). */
     fun setBypass(on: Boolean) {
         bypassed = on

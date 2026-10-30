@@ -40,15 +40,30 @@ rfx_generate_configs
 rfx_ensure_mounted
 say "Restarting audio services..."
 rfx_restart_audio
-sleep 4
+
+# The HAL needs time to restart and reload the patched configs (Samsung's
+# vendor HALs regularly take longer than a few seconds), so poll for
+# registration instead of checking once and reporting a false failure.
+registered=0
+tries=0
+while [ "$tries" -lt 15 ]; do
+    if rfx_engine_registered; then registered=1; break; fi
+    sleep 2
+    tries=$((tries + 1))
+done
 
 missing="$(rfx_configs_missing)"
-if rfx_engine_registered; then say "Audio HAL: engine registered"; else say "Audio HAL: engine NOT registered"; fi
-if rfx_lib_visible && [ "$missing" = "0" ] && rfx_engine_registered; then
+if [ "$registered" = "1" ]; then say "Audio HAL: engine registered"; else say "Audio HAL: engine NOT registered yet"; fi
+if rfx_lib_visible && [ "$missing" = "0" ] && [ "$registered" = "1" ]; then
     say "Result: ✅ engine and $(wc -l < "$RFX_STATE/configs" | tr -d ' ') config(s) in place."
     say "Open the ResonanceFX app: the Status screen confirms the effect is registered."
-else
+elif [ "$missing" = "0" ] && [ "$registered" != "1" ]; then
+    say "Result: ⚠️ configs and library are in place, but the audio HAL has not registered the engine yet."
+    say "It may still be restarting - wait a few seconds and check the app's Status screen, or tap Action again."
+elif [ "$missing" != "0" ]; then
     say "Result: ❌ $missing config(s) still missing. Full log: $RFX_LOGDIR"
+else
+    say "Result: ❌ engine library not visible to the HAL. Full log: $RFX_LOGDIR"
 fi
 
 # Recent effect-factory errors mentioning us, if any.

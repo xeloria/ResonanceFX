@@ -199,6 +199,7 @@ int Engine::setParameter(int32_t id, const uint8_t* value, uint32_t size) {
         case kMultibandSettings:
         case kDynamicEqBands:
         case kSpeakerCorrection:
+        case kSpeakerProtectCeilings:
             return setPayload(id, value, size);
         default:
             break;
@@ -449,8 +450,10 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
         case kSpeakerProtectEnable: stProtect_.target = on; return 0;
         case kSpeakerProtectResonance:
         case kSpeakerProtectLimit:
+        case kSpeakerProtectMode:
             if (id == kSpeakerProtectResonance) protectSettings_.resonanceHz = static_cast<float>(clampv(a, 30, 2000));
-            else protectSettings_.limitDb = clampv(a / 100.0f, -30.0f, 0.0f);
+            else if (id == kSpeakerProtectLimit) protectSettings_.limitDb = clampv(a / 100.0f, -30.0f, 0.0f);
+            else protectSettings_.measured = a == 1;
             protect_.set(protectSettings_);
             return 0;
 
@@ -458,9 +461,11 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
         case kCrosstalkAmount:
         case kCrosstalkSpacing:
         case kCrosstalkDistance:
+        case kCrosstalkOrientation:
             if (id == kCrosstalkAmount) xtcSettings_.amount = clampv(a, 0, 100) / 100.0f;
             else if (id == kCrosstalkSpacing) xtcSettings_.spacingCm = static_cast<float>(clampv(a, 2, 100));
-            else xtcSettings_.distanceCm = static_cast<float>(clampv(a, 10, 500));
+            else if (id == kCrosstalkDistance) xtcSettings_.distanceCm = static_cast<float>(clampv(a, 10, 500));
+            else xtcSettings_.orientation = clampv(a, 0, 100) / 100.0f;
             xtc_.set(xtcSettings_);
             return 0;
 
@@ -564,6 +569,14 @@ int Engine::setPayload(int32_t id, const uint8_t* value, uint32_t size) {
                 s.gainDb[i] = clampv(f[28 + i], -24.0f, 24.0f);
             }
             mbc_.set(s);
+            return 0;
+        }
+        case kSpeakerProtectCeilings: {
+            constexpr uint32_t kBands = SpeakerProtector::kBands;
+            if (count != kBands || kBands > floatsAvailable) return -EINVAL;
+            const auto c = floats(4, kBands);
+            for (uint32_t b = 0; b < kBands; ++b) protectSettings_.ceilingDb[b] = clampv(c[b], -60.0f, 0.0f);
+            protect_.set(protectSettings_);
             return 0;
         }
         case kDynamicEqBands: {
@@ -883,7 +896,24 @@ void Engine::diagnostics(const float* l, const float* r, int n) {
 }
 #endif
 
+int Engine::latency() const {
+    if (modulesOff_) return 0;
+    int samples = 0;
+    if (stConv_.target) samples += conv_.latency();
+    if (stVocal_.target) samples += vocal_.latency();
+    if (stVse_.target) samples += vse_.latency();
+    if (stClarity_.target) samples += clarity_.latency();
+    if (stTube_.target) samples += tube_.latency();
+    if (stComp_.target && comp_p_.noClip) samples += compClip_.latency();
+    return samples;
+}
+
 void Engine::processBlock(float* l, float* r, int n) {
+    if (!modulesOff_) processModules(l, r, n);
+    master(l, r, n);
+}
+
+void Engine::processModules(float* l, float* r, int n) {
     run(stDdc_, l, r, n, [&](float* a, float* b, int m) { ddc_.process(a, b, m); }, [&] { ddc_.reset(); });
     run(stAutoEq_, l, r, n, [&](float* a, float* b, int m) { autoEq_.process(a, b, m); }, [&] { autoEq_.reset(); });
     run(stConv_, l, r, n,
@@ -973,7 +1003,9 @@ void Engine::processBlock(float* l, float* r, int n) {
     run(stXtc_, l, r, n, [&](float* a, float* b, int m) { xtc_.process(a, b, m); }, [&] { xtc_.reset(); });
     run(stSpeaker_, l, r, n, [&](float* a, float* b, int m) { speaker_.process(a, b, m); }, [&] { speaker_.reset(); });
     run(stAgc_, l, r, n, [&](float* a, float* b, int m) { agc_.process(a, b, m); }, [&] { agc_.reset(); });
+}
 
+void Engine::master(float* l, float* r, int n) {
     // Master: output gain and balance (ramped), then the true-peak limiter.
     const int ramp = static_cast<int>(0.02 * fs_);
     outGain_.setTarget(targetGain_, ramp);

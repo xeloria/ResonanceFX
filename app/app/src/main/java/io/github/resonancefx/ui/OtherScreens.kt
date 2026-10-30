@@ -158,6 +158,8 @@ fun PresetsScreen() {
 fun StatusScreen() {
     val status = rememberDriverStatus(1500)
     val context = LocalContext.current
+    var showMeasurements by remember { mutableStateOf(false) }
+    if (showMeasurements) MeasurementsDialog { showMeasurements = false }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { ScreenTitle("Engine status") }
         if (status == null) {
@@ -205,8 +207,9 @@ fun StatusScreen() {
                 }) { Text("Copy report") }
                 OutlinedButton(onClick = { EngineService.start(context, EngineService.ACTION_REAPPLY) }) { Text("Re-apply") }
             }
-            Row(Modifier.padding(top = 8.dp)) {
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { TestTone.play() }) { Text("Play test tone") }
+                OutlinedButton(onClick = { showMeasurements = true }) { Text("Engine measurements") }
             }
             Text(
                 "Plays a 3-second chord. With effects on, \"Processing audio\" should get a check mark while it plays.",
@@ -267,6 +270,7 @@ fun SettingsScreen() {
     var perDevice by remember { mutableStateOf(repo.perDeviceProfiles) }
     var boot by remember { mutableStateOf(repo.startOnBoot) }
     var showLicenses by remember { mutableStateOf(false) }
+    var showMeasurements by remember { mutableStateOf(false) }
 
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { ScreenTitle("Settings") }
@@ -313,11 +317,13 @@ fun SettingsScreen() {
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(onClick = { showLicenses = true }, contentPadding = PaddingValues(0.dp)) { Text("Open-source licenses") }
+                    TextButton(onClick = { showMeasurements = true }, contentPadding = PaddingValues(0.dp)) { Text("Engine measurements") }
                 }
             }
         }
     }
     if (showLicenses) LicensesDialog { showLicenses = false }
+    if (showMeasurements) MeasurementsDialog { showMeasurements = false }
 
     // Apply mode changes to the running service.
     androidx.compose.runtime.LaunchedEffect(mode) {

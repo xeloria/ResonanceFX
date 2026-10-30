@@ -27,8 +27,13 @@ void SpeakerProtector::reset() {
     excL_.reset();
     excR_.reset();
     xo_.reset();
+    bands_.reset();
     envDb_ = -150.0;
     gainDb_ = 0.0;
+    for (int b = 0; b < kBands; ++b) {
+        bandEnvDb_[b] = -150.0;
+        bandGainDb_[b] = 0.0;
+    }
 }
 
 void SpeakerProtector::set(const Settings& s) {
@@ -43,10 +48,50 @@ void SpeakerProtector::design() {
     excursion_ = designRbj(FilterType::LowPass, f0, 0.0, 0.70710678, fs_);
     const double xo = 1.4 * f0;
     xo_.configure(&xo, 1, fs_);
+    bands_.configure(kCrossovers, kBands - 1, fs_);
+}
+
+namespace {
+
+/// Infinite-ratio gain computer with a 3 dB soft knee: the gain (dB) that holds `levelDb` at `ceilingDb`.
+double limitGainDb(double levelDb, double ceilingDb) {
+    constexpr double kKneeDb = 3.0;
+    const double over = levelDb - ceilingDb;
+    if (over >= 0.5 * kKneeDb) return -over;
+    if (over > -0.5 * kKneeDb) return -(over + 0.5 * kKneeDb) * (over + 0.5 * kKneeDb) / (2.0 * kKneeDb);
+    return 0.0;
+}
+
+}  // namespace
+
+void SpeakerProtector::processMeasured(float* left, float* right, int n) {
+    double bl[kBands], br[kBands];
+    for (int i = 0; i < n; ++i) {
+        bands_.split(left[i], right[i], bl, br);
+        double l = 0.0, r = 0.0;
+        for (int b = 0; b < kBands; ++b) {
+            if (s_.ceilingDb[b] < 0.0f) {
+                const double xDb = gainToDb(std::max(std::fabs(bl[b]), std::fabs(br[b])));
+                bandEnvDb_[b] = xDb > bandEnvDb_[b] ? xDb : xDb + envRelease_ * (bandEnvDb_[b] - xDb);
+                const double target = limitGainDb(bandEnvDb_[b], s_.ceilingDb[b]);
+                bandGainDb_[b] = target + (target < bandGainDb_[b] ? gainAttack_ : gainRelease_) * (bandGainDb_[b] - target);
+            } else {
+                bandGainDb_[b] = 0.0;
+            }
+            const double g = bandGainDb_[b] < -0.001 ? dbToGain(bandGainDb_[b]) : 1.0;
+            l += bl[b] * g;
+            r += br[b] * g;
+        }
+        left[i] = static_cast<float>(l);
+        right[i] = static_cast<float>(r);
+    }
 }
 
 void SpeakerProtector::process(float* left, float* right, int n) {
-    constexpr double kKneeDb = 3.0;
+    if (s_.measured) {
+        processMeasured(left, right, n);
+        return;
+    }
     const double limit = s_.limitDb;
     for (int i = 0; i < n; ++i) {
         const double l = biquadTick(subsonic_, subL_, left[i]);
@@ -55,11 +100,7 @@ void SpeakerProtector::process(float* left, float* right, int n) {
         const double xDb = gainToDb(x);
         envDb_ = xDb > envDb_ ? xDb : xDb + envRelease_ * (envDb_ - xDb);
 
-        // Infinite ratio above the limit, with a soft knee.
-        const double over = envDb_ - limit;
-        double target = 0.0;
-        if (over >= 0.5 * kKneeDb) target = -over;
-        else if (over > -0.5 * kKneeDb) target = -(over + 0.5 * kKneeDb) * (over + 0.5 * kKneeDb) / (2.0 * kKneeDb);
+        const double target = limitGainDb(envDb_, limit);
         gainDb_ = target + (target < gainDb_ ? gainAttack_ : gainRelease_) * (gainDb_ - target);
 
         double bl[2], br[2];
@@ -108,7 +149,8 @@ void CrosstalkCanceller::set(const Settings& s) {
     delay_ = clampv(d, 1.0, static_cast<double>(kBufferSize - 2));
     // Loop gain below 1 keeps the recursion stable (|BP| <= 1); 0.65 caps the side lift at about
     // +7 dB around 500 Hz-1 kHz for a phone held at arm's length.
-    gain_.setTarget(0.65f * clampv(s.amount, 0.0f, 1.0f), static_cast<int>(0.02 * fs_));
+    // Turning the device glides over 300 ms, like the screen's rotation animation.
+    gain_.setTarget(0.65f * clampv(s.amount, 0.0f, 1.0f) * clampv(s.orientation, 0.0f, 1.0f), static_cast<int>(0.3 * fs_));
 }
 
 void CrosstalkCanceller::process(float* left, float* right, int n) {

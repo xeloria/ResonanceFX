@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.2.0
+
+- **Blind test**: find out whether you really hear an effect. A is without it, B with it, X is
+  secretly one of them; the engine plays them time-aligned and at matched loudness (BS.1770,
+  3 s moving average), so only the effect itself can give X away. Test all effects or a single
+  one, 10/16/20 trials, with the statistical verdict (binomial, p < 0.05) and a history.
+- **Engine measurements**: every effect's measured frequency response, loudness change,
+  distortion, dynamics, stereo width and decay, shown in the app (Status tab and About) and
+  published with each release. Measured, not claimed.
+- **Sound like another speaker**: refit a measured speaker's correction so it matches another
+  speaker you measured, within the range both can play.
+- **Speaker widening follows the device**: on the built-in speakers it fades in when the phone is
+  held sideways and out when upright (where the speakers are above and below you).
+- **Distortion-aware speaker protection**: the speaker measurement can also play rising sweeps
+  (opt-in, stops as soon as the speaker distorts) to find, per band, the loudest level below 5 %
+  distortion. Speaker protection's new "Measured" mode then limits each band at its own measured
+  ceiling.
+
 ## v2.1.0
 
 Speakers get the same care as headphones.

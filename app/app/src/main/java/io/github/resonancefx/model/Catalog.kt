@@ -59,8 +59,11 @@ class GraphicEqControl(override val key: String, override val label: String, val
  *  3 low-pass, 4 high-pass, 5 band-pass, 6 notch. */
 class BandsControl(override val key: String, override val label: String) : Control
 
-/** The user's own speaker measurement and the correction fitted to it (see [Composite.Measurement]). */
-class MeasureControl(override val key: String, override val label: String) : Control
+/**
+ * The user's own speaker measurement and the correction fitted to it (see [Composite.Measurement]);
+ * [matchKey] holds the profile of the speaker it is matched to ("" = the natural target).
+ */
+class MeasureControl(override val key: String, override val label: String, val matchKey: String) : Control
 
 class Section(
     val id: String,
@@ -77,6 +80,8 @@ class Section(
      * after any of the section's controls change (their own apply lambdas do nothing).
      */
     val compose: ((EngineEffect, Settings) -> Unit)? = null,
+    /** Settings of other sections that [compose] also reads (it re-runs when they change). */
+    val dependsOn: Set<String> = emptySet(),
 )
 
 object Catalog {
@@ -87,6 +92,9 @@ object Catalog {
     const val KEY_SPEAKER_ENABLE = "speaker.enable"
     const val KEY_SPEAKER_PROFILE = "speaker.profile"
     const val KEY_SPEAKER_MEASURED = "speaker.measured"
+    const val KEY_SPEAKER_MATCH = "speaker.match"
+    const val KEY_XTC_SIDEWAYS = "xtc.sideways"
+    const val KEY_PROTECT_SIZE = "protect.size"
 
     /** Engine speaker profiles, in protocol order; the last one plays the user's measurement. */
     val SPEAKER_PROFILES = listOf(
@@ -425,7 +433,7 @@ object Catalog {
             listOf(
                 Choice(KEY_SPEAKER_PROFILE, "Speaker", SPEAKER_PROFILES, 0) { _, _ -> },
                 Slider("speaker.strength", "Strength", 0..100, 100, ::percent) { _, _ -> },
-                MeasureControl(KEY_SPEAKER_MEASURED, "Your measurement"),
+                MeasureControl(KEY_SPEAKER_MEASURED, "Your measurement", KEY_SPEAKER_MATCH),
             ),
             feature = Params.FEATURE_SPEAKER_PROFILES,
             compose = { fx, s ->
@@ -439,14 +447,24 @@ object Catalog {
             "Holds back bass a small speaker can't play, so it goes louder without rattling or distorting.",
             "protect.enable", Params.SPEAKER_PROTECT_ENABLE,
             listOf(
-                Choice("protect.size", "Speaker", SPEAKER_SIZES.map { it.first }, 0) { fx, v ->
-                    fx.set(Params.SPEAKER_PROTECT_RESONANCE, SPEAKER_SIZES[v].second)
-                },
-                Slider("protect.limit", "Bass ceiling", -24..-3, -12, { "$it dB" }) { fx, v ->
-                    fx.set(Params.SPEAKER_PROTECT_LIMIT, v * 100)
-                },
+                Choice(KEY_PROTECT_SIZE, "Speaker", SPEAKER_SIZES.map { it.first } + "Measured (your speaker's distortion test)", 0) { _, _ -> },
+                Slider("protect.limit", "Bass ceiling (typical speakers)", -24..-3, -12, { "$it dB" }) { _, _ -> },
             ),
             feature = Params.FEATURE_SPEAKER_PROTECTION,
+            dependsOn = setOf(KEY_SPEAKER_MEASURED),
+            compose = { fx, s ->
+                val size = s.int(KEY_PROTECT_SIZE)
+                // The measured limits come from the distortion test in "Speaker correction".
+                val ceilings = if (size == SPEAKER_SIZES.size) Composite.protectionCeilings(s.string(KEY_SPEAKER_MEASURED)) else null
+                if (ceilings != null) {
+                    fx.set(Params.SPEAKER_PROTECT_CEILINGS, ceilings)
+                    fx.set(Params.SPEAKER_PROTECT_MODE, 1)
+                } else {
+                    fx.set(Params.SPEAKER_PROTECT_MODE, 0)
+                    fx.set(Params.SPEAKER_PROTECT_RESONANCE, SPEAKER_SIZES[size.coerceAtMost(SPEAKER_SIZES.lastIndex)].second)
+                    fx.set(Params.SPEAKER_PROTECT_LIMIT, s.int("protect.limit") * 100)
+                }
+            },
         ),
         Section(
             "xtc", "Speaker widening",
@@ -458,6 +476,8 @@ object Catalog {
                 Slider("xtc.distance", "Listening distance", 20..200, 40, { "$it cm" }) { fx, v ->
                     fx.set(Params.CROSSTALK_DISTANCE, v)
                 },
+                // Read by the service, which follows the device's orientation.
+                Toggle(KEY_XTC_SIDEWAYS, "Only when held sideways (built-in speakers)", true) { _, _ -> },
             ),
             feature = Params.FEATURE_CROSSTALK,
         ),
@@ -479,7 +499,10 @@ object Catalog {
                         is AutoEqControl -> put(c.key, "")
                         is GraphicEqControl -> put(c.key, "")
                         is BandsControl -> put(c.key, "")
-                        is MeasureControl -> put(c.key, "")
+                        is MeasureControl -> {
+                            put(c.key, "")
+                            put(c.matchKey, "")
+                        }
                     }
                 }
             }
@@ -490,9 +513,11 @@ object Catalog {
         sections.flatMap { s -> s.controls.map { it.key to (s to it) } }.toMap()
     }
 
-    /** Composite sections by any of their control keys. */
-    val composites: Map<String, Section> by lazy {
-        sections.filter { it.compose != null }.flatMap { s -> s.controls.map { it.key to s } }.toMap()
+    /** Composite sections by any of their control keys (and the keys they depend on). */
+    val composites: Map<String, List<Section>> by lazy {
+        sections.filter { it.compose != null }
+            .flatMap { s -> (s.controls.map { it.key } + s.dependsOn).map { it to s } }
+            .groupBy({ it.first }, { it.second })
     }
 
     val sectionsByEnableKey: Map<String, Section> by lazy {

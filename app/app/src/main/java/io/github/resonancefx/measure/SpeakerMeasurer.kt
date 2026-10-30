@@ -14,6 +14,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import io.github.resonancefx.model.Composite
 import io.github.resonancefx.service.EngineService
+import io.github.resonancefx.service.VolumeWatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -21,6 +22,7 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 
 /**
  * Measures the current output with the phone's microphone: plays [SWEEPS] sweeps with effects
@@ -34,25 +36,76 @@ class SpeakerMeasurer(context: Context) {
         get() = audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() /
             max(1, audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
 
-    /** [progress] receives 0..1. Needs RECORD_AUDIO. */
-    suspend fun measure(progress: (Float) -> Unit): Composite.Measurement = withContext(Dispatchers.Default) {
-        if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
-            throw MeasureException("Media volume is muted. Turn it up to a normal listening level.")
-        }
-        val sweep = SpeakerAnalysis.sweep()
-        // Measure the speaker itself, not the speaker plus our own effects.
-        EngineService.setBypass(true)
-        try {
-            delay(400)
-            val captures = (0 until SWEEPS).map { k ->
-                val recording = capture(sweep) { p -> progress((k + p) / SWEEPS * 0.9f) }
-                SpeakerAnalysis.analyse(recording, sweep)
+    /**
+     * [progress] receives 0..1. Needs RECORD_AUDIO. With [distortion], louder sweeps follow to
+     * find where the speaker starts to distort (see [measureDistortion]).
+     */
+    suspend fun measure(progress: (Float) -> Unit, distortion: Boolean = false): Composite.Measurement =
+        withContext(Dispatchers.Default) {
+            if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
+                throw MeasureException("Media volume is muted. Turn it up to a normal listening level.")
             }
-            progress(0.95f)
-            CorrectionFitter.fit(SpeakerAnalysis.combine(captures)).also { progress(1f) }
-        } finally {
-            EngineService.setBypass(false)
+            val sweep = SpeakerAnalysis.sweep()
+            val steps = SWEEPS + if (distortion) DISTORTION_LEVELS.size else 0
+            // Measure the speaker itself, not the speaker plus our own effects.
+            EngineService.setBypass(true)
+            try {
+                delay(400)
+                val captures = (0 until SWEEPS).map { k ->
+                    val recording = capture(sweep) { p -> progress((k + p) / steps * 0.95f) }
+                    SpeakerAnalysis.analyse(recording, sweep)
+                }
+                val fitted = CorrectionFitter.fit(SpeakerAnalysis.combine(captures))
+                val d = if (distortion) measureDistortion { k, p -> progress((SWEEPS + k + p) / steps * 0.95f) } else null
+                progress(1f)
+                fitted.copy(distortion = d)
+            } finally {
+                EngineService.setBypass(false)
+            }
         }
+
+    /**
+     * Plays sweeps at rising levels ([DISTORTION_LEVELS]) and records, per protection band, the
+     * loudest level that stayed below 5 % THD. Stops as soon as any band passes 20 % or the
+     * microphone overloads, so the speaker is never pushed further than needed to find its limit.
+     */
+    private suspend fun measureDistortion(progress: (Int, Float) -> Unit): Composite.Distortion {
+        val bands = SpeakerAnalysis.DISTORTION_BANDS.size
+        val clean = arrayOfNulls<Float>(bands)      // loudest clean level so far
+        val failed = BooleanArray(bands)
+        var lastTested = DISTORTION_LEVELS.first().toFloat()
+        var completed = true
+        for ((k, level) in DISTORTION_LEVELS.withIndex()) {
+            val sweep = SpeakerAnalysis.sweep(10.0.pow(level / 20.0))
+            val thd: Array<Double?> = try {
+                SpeakerAnalysis.analyseDistortion(capture(sweep) { p -> progress(k, p) }, sweep)
+            } catch (e: OverloadException) {
+                // Too loud for the microphone (or the speaker): every band ends here.
+                completed = false
+                break
+            }
+            lastTested = level.toFloat()
+            for (b in 0 until bands) {
+                if (failed[b]) continue
+                if ((thd[b] ?: 0.0) <= CLEAN_THD) clean[b] = level.toFloat() else failed[b] = true
+            }
+            if (thd.any { (it ?: 0.0) > STOP_THD }) {
+                completed = false
+                break
+            }
+        }
+        val first = DISTORTION_LEVELS.first().toFloat()
+        val result = List(bands) { b ->
+            when {
+                // Already distorting at the quietest level: allow 3 dB less than that.
+                clean[b] == null -> first - 3f
+                failed[b] -> clean[b]
+                // Clean as far as we went; if the test stopped early, only that far is known.
+                completed -> null
+                else -> lastTested
+            }
+        }
+        return Composite.Distortion(VolumeWatcher.levelOffsetDb(audio), result)
     }
 
     @SuppressLint("MissingPermission")
@@ -130,5 +183,9 @@ class SpeakerMeasurer(context: Context) {
 
     companion object {
         const val SWEEPS = 2
+        /** Sweep levels of the distortion test, dBFS. */
+        val DISTORTION_LEVELS = listOf(-12.0, -9.0, -6.0, -3.0, 0.0)
+        private const val CLEAN_THD = 0.05
+        private const val STOP_THD = 0.2
     }
 }

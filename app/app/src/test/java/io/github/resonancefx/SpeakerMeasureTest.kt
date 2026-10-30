@@ -31,6 +31,8 @@ class SpeakerMeasureTest {
         val cw = cos(w)
         val (b, d) = if (type == 4) {
             doubleArrayOf((1 + cw) / 2, -(1 + cw), (1 + cw) / 2) to doubleArrayOf(1 + alpha, -2 * cw, 1 - alpha)
+        } else if (type == 3) {
+            doubleArrayOf((1 - cw) / 2, 1 - cw, (1 - cw) / 2) to doubleArrayOf(1 + alpha, -2 * cw, 1 - alpha)
         } else {
             doubleArrayOf(1 + alpha * a, -2 * cw, 1 - alpha * a) to doubleArrayOf(1 + alpha / a, -2 * cw, 1 - alpha / a)
         }
@@ -96,6 +98,70 @@ class SpeakerMeasureTest {
         assertNotNull(stored)
         assertEquals(m.bands.size, stored!!.bands.size)
         assertEquals(m.responseDb.size, stored.responseDb.size)
+    }
+
+    @Test fun matchesOneSpeakerToAnother() {
+        val f = Response.frequencies
+        val peak = listOf(io.github.resonancefx.autoeq.PeqFilter(0, 2000f, 6f, 1f))
+        // A: flat. B: a +6 dB peak at 2 kHz. Both play 100 Hz - 16 kHz.
+        val a = Composite.Measurement(0f, emptyList(), List(f.size) { 0f }, 100f, 16000f)
+        val b = Composite.Measurement(0f, emptyList(), f.map { Response.at(0f, peak, it.toDouble()) }, 100f, 16000f)
+        for ((from, to) in listOf(b to a, a to b)) {
+            val m = CorrectionFitter.refit(from, to)
+            val c = CorrectionFitter.correctionDb(m)
+            var worst = 0f
+            for (i in f.indices) {
+                if (f[i] < 150f || f[i] > 12000f) continue
+                worst = maxOf(worst, abs(from.responseDb[i] + c[i] - to.responseDb[i]))
+            }
+            assertTrue("matched curve off by $worst dB", worst < 1.0f)
+        }
+        // Back to the natural target: B's correction cuts the peak.
+        val natural = CorrectionFitter.correctionDb(CorrectionFitter.refit(b, null))
+        assertTrue(natural[f.indexOfFirst { it >= 2000f }] < -4f)
+    }
+
+    /**
+     * A speaker whose bass (below ~250 Hz) saturates (tanh) as the level rises while the rest
+     * stays linear, recorded at sweep level [levelDb].
+     */
+    private fun distortingRecording(levelDb: Double): Pair<FloatArray, FloatArray> {
+        val sweep = SpeakerAnalysis.sweep(10.0.pow(levelDb / 20))
+        val total = SpeakerAnalysis.recordFrames
+        val start = (SpeakerAnalysis.LEAD_SECONDS * rate).toInt() + (0.02 * rate).toInt()
+        val x = DoubleArray(total)
+        for (i in sweep.indices) if (start + i < total) x[start + i] = sweep[i].toDouble()
+        val low = x.copyOf()
+        biquad(low, 3, 250.0, 0.0, 0.7071)
+        biquad(low, 3, 250.0, 0.0, 0.7071)
+        val g = 2.5
+        val rnd = Random(3)
+        val out = FloatArray(total) { i ->
+            val high = x[i] - low[i]
+            (0.3 * (kotlin.math.tanh(g * low[i]) / g + high) + 0.0002 * (rnd.nextDouble() * 2 - 1)).toFloat()
+        }
+        return out to sweep
+    }
+
+    @Test fun findsWhereTheBassStartsToDistort() {
+        val quiet = distortingRecording(-12.0).let { (r, s) -> SpeakerAnalysis.analyseDistortion(r, s) }
+        val loud = distortingRecording(0.0).let { (r, s) -> SpeakerAnalysis.analyseDistortion(r, s) }
+        // Deep bass: clean (< 5 %) quietly, clearly distorted at full scale.
+        assertTrue("quiet bass THD ${quiet[0]}", (quiet[0] ?: 0.0) < 0.05)
+        assertTrue("loud bass THD ${loud[0]}", (loud[0] ?: 0.0) > 0.10)
+        // Upper mids (1-4 kHz) never pass through the saturating part.
+        assertTrue("loud 1-4 kHz THD ${loud[4]}", (loud[4] ?: 0.0) < 0.02)
+    }
+
+    @Test fun distortionResultsRoundTripAndBecomeCeilings() {
+        val d = Composite.Distortion(-20f, listOf(-9f, -6f, null, null, null))
+        val m = Composite.Measurement(0f, emptyList(), listOf(0f, 1f), 100f, 16000f, d)
+        val back = Composite.parseMeasurement(Composite.formatMeasurement(m))
+        assertEquals(d, back!!.distortion)
+        // Engine ceilings: the clean level plus the volume Android applied first; 0 = no limit.
+        assertEquals(listOf(-29f, -26f, 0f, 0f, 0f), d.ceilings().toList())
+        // Measurements saved before the distortion test existed still load.
+        assertNotNull(Composite.parseMeasurement("0.00;100;16000||0.0,1.0"))
     }
 
     @Test(expected = MeasureException::class) fun rejectsANoisyRoom() {
