@@ -4,6 +4,8 @@
 package io.github.resonancefx.data
 
 import io.github.resonancefx.model.Catalog
+import io.github.resonancefx.model.Tables
+import kotlin.math.roundToInt
 import org.json.JSONObject
 
 /** An immutable set of effect values. Unknown keys are dropped, missing keys use defaults. */
@@ -34,20 +36,25 @@ class Settings private constructor(private val values: Map<String, Any>) {
     override fun hashCode() = Catalog.defaults.keys.sumOf { this[it].hashCode() }
 
     companion object {
-        const val FORMAT = "resonancefx.settings.v1"
+        const val FORMAT = "resonancefx.settings.v2" // v1 stored bass.gain as a table index
         val DEFAULT = Settings(emptyMap())
 
         fun fromJson(json: JSONObject): Settings {
             val v = json.optJSONObject("values") ?: json
+            // v1 stored bass.gain as a boost-table index (0..11); v2 stores dB x10 (0..170).
+            val legacy = json.optString("format") != FORMAT
             val parsed = HashMap<String, Any>()
             Catalog.defaults.forEach { (key, default) ->
                 if (!v.has(key)) return@forEach
                 val raw = v.get(key)
-                val value: Any? = when (default) {
+                var value: Any? = when (default) {
                     is Boolean -> raw as? Boolean ?: raw.toString().toBooleanStrictOrNull()
                     is Int -> (raw as? Number)?.toInt() ?: raw.toString().toIntOrNull()
                     is String -> raw.toString()
                     else -> null
+                }
+                if (legacy && key == "bass.gain" && value is Int) {
+                    value = (Tables.BASS_BOOST_DB[value.coerceIn(Tables.BASS_BOOST_DB.indices)].toFloat() * 10).roundToInt()
                 }
                 if (value != null) parsed[key] = clamp(key, value)
             }

@@ -77,22 +77,25 @@ class SessionManager(private val applier: Applier) {
         effects.values.forEach { (_, fx) -> runSafely { fx.set(param, value) } }
     }
 
-    /** Listening-test control, sent to every instance (see Params.ABX_*). */
-    fun abx(param: Int, value: Int) {
-        effects.values.forEach { (_, fx) -> runSafely { fx.set(param, value) } }
-    }
-
-    /** Loudness of B minus A in dB x100, [Params.ABX_NOT_READY] until measured, null if detached. */
-    fun abxDelta(): Int? = primary?.getInt(Params.GET_ABX_DELTA)
-
     /** Pauses every instance (true) or restores the master switch (false). */
     fun setBypass(on: Boolean) {
         bypassed = on
         effects.values.forEach { (_, fx) -> runSafely { fx.enabled = !on && settings.bool(Catalog.KEY_MASTER) } }
     }
 
-    /** Periodic health check: replaces engine handles that died with audioserver. */
-    fun watchdog() = reattachIfLost()
+    /**
+     * Periodic health check. One `GET_ENABLED` round-trip per live instance: replaces engine
+     * handles that died with audioserver, and classifies the tick for the caller's cadence:
+     * true = keep the fast cadence (audio can be flowing — some instance is enabled, or
+     * nothing is attached and the global retry is trying, or a handle was just replaced);
+     * false = every instance answered and is disabled (idle), where periodic commands are the
+     * only thing going through and the next probe can wait longer — this is the state where
+     * the probe can audibly disturb a suspended/offloaded Bluetooth output thread.
+     */
+    fun watchdog(): Boolean {
+        val probe = reattachIfLost()
+        return probe.anyEnabled || effects.isEmpty() || probe.dead.isNotEmpty()
+    }
 
     /** Re-applies everything, e.g. after the output route or sample rate changed. */
     fun reapply() {
@@ -117,7 +120,16 @@ class SessionManager(private val applier: Applier) {
         try {
             val fx = EngineEffect(sessionId)
             effects[sessionId] = packageName to fx
-            applyAll(fx)
+            try {
+                applyAll(fx)
+            } catch (e: Throwable) {
+                // A half-applied instance must not stay registered: it still answers GET_ENABLED,
+                // so reattachIfLost() would never replace it and the session slot (per-app mode)
+                // stays occupied by an engine that was never enabled.
+                effects.remove(sessionId)
+                fx.close()
+                throw e
+            }
             _error.value = null
             Log.i(TAG, "Attached engine to session $sessionId ($packageName)")
         } catch (e: Throwable) {
@@ -138,18 +150,29 @@ class SessionManager(private val applier: Applier) {
     /**
      * Audioserver restarts (crash, module repair, some ROMs on route changes) silently kill every
      * effect handle. Detect that and attach a fresh instance so effects come back by themselves.
+     * Also reports what it found: [Probe.anyEnabled] as used by [watchdog], [Probe.dead] as the
+     * list of sessions that did lose their handle.
      */
-    private fun reattachIfLost() {
+    private class Probe(val dead: List<Pair<Int, String>>, val anyEnabled: Boolean)
+
+    private fun reattachIfLost(): Probe {
         // A dead audioserver makes every getParameter fail; a live engine always answers this.
-        val lost = effects.filterValues { (_, fx) -> fx.getInt(Params.GET_ENABLED) == null }
-        lost.forEach { (id, value) ->
+        val dead = ArrayList<Pair<Int, String>>()
+        var anyEnabled = false
+        for ((id, value) in effects.entries.toList()) {
+            val enabled = value.second.getInt(Params.GET_ENABLED)
+            if (enabled == null) dead += id to value.first
+            else if (enabled != 0) anyEnabled = true
+        }
+        dead.forEach { (id, pkg) ->
             Log.i(TAG, "Session $id lost its engine handle, re-attaching")
             detach(id)
-            attach(id, value.first)
+            attach(id, pkg)
         }
         // An attach made while audioserver was still restarting fails ("Cannot initialize effect
         // engine"); keep trying instead of staying off until the app restarts.
         if (started && mode == AttachMode.GLOBAL && !effects.containsKey(GLOBAL_SESSION)) attach(GLOBAL_SESSION, "android")
+        return Probe(dead, anyEnabled)
     }
 
     private inline fun runSafely(block: () -> Unit) {

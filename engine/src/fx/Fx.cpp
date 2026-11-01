@@ -148,20 +148,46 @@ void HaasDelay::reset() {
 }
 
 void HaasDelay::setDelayMs(float ms) {
-    delay_ = static_cast<int>(std::lround(clampv(ms, 0.0f, 20.0f) * fs_ / 1000.0));
-    delay_ = std::min(delay_, static_cast<int>(buf_.size()) - 1);
+    const int want = std::min(static_cast<int>(std::lround(clampv(ms, 0.0f, 20.0f) * fs_ / 1000.0)),
+                              static_cast<int>(buf_.size()) - 1);
+    if (want == delay_) {
+        pendingDelayMs_ = -1.0f;
+        return;
+    }
+    if (dipRemaining_ > 0) {
+        pendingDelayMs_ = ms;  // a drag re-arms the pending value instead of re-dipping
+        return;
+    }
+    pendingDelayMs_ = ms;
+    dipTotal_ = dipRemaining_ = std::max(64, static_cast<int>(0.006 * fs_));
 }
 
 void HaasDelay::process(float* left, float* right, int n) {
     (void) left;
-    if (delay_ <= 0 || buf_.empty()) return;
+    if (buf_.empty()) return;
+    if (delay_ <= 0 && dipRemaining_ <= 0 && pendingDelayMs_ < 0.0f) return;
     const int size = static_cast<int>(buf_.size());
     for (int i = 0; i < n; ++i) {
-        buf_[pos_] = right[i];
+        float y = right[i];
+        buf_[pos_] = y;
         int read = pos_ - delay_;
         if (read < 0) read += size;
-        right[i] = buf_[read];
+        y = buf_[read];
         if (++pos_ == size) pos_ = 0;
+        if (dipRemaining_ > 0) {
+            // 6 ms dip: 1 -> 0 over the first quarter, silent while the delay switches, 0 -> 1.
+            const float u = 1.0f - static_cast<float>(dipRemaining_) / static_cast<float>(dipTotal_);
+            if (u >= 0.25f && pendingDelayMs_ >= 0.0f) {
+                const int want = static_cast<int>(std::lround(clampv(pendingDelayMs_, 0.0f, 20.0f) * fs_ / 1000.0));
+                delay_ = std::min(want, size - 1);
+                pendingDelayMs_ = -1.0f;
+            }
+            y *= u < 0.25f ? 1.0f - 4.0f * u : (u > 0.75f ? 4.0f * u - 3.0f : 0.0f);
+            if (--dipRemaining_ == 0) dipTotal_ = 0;
+        } else if (pendingDelayMs_ >= 0.0f) {
+            setDelayMs(pendingDelayMs_);
+        }
+        right[i] = y;
     }
 }
 

@@ -98,7 +98,7 @@ enum Param : int32_t {
 
     kFieldSurroundEnable = 65553,
     kFieldSurroundMidImage = 65555,  // 100..200 -> mid level 0..100 %
-    kFieldSurroundDepth = 65556,     // 200..800 -> strength 1..9
+    kFieldSurroundDepth = 65556,     // 200..800 -> side widening 0..1 (up to x2.5 = +8 dB)
 
     kDiffSurroundEnable = 65557,
     kDiffSurroundDelay = 65558,  // 100..2000 -> 1..20 ms
@@ -112,7 +112,7 @@ enum Param : int32_t {
 
     kAgcEnable = 65565,
     kAgcRatio = 65566,      // 50 | 100 | 300: gentle | medium | strong
-    kAgcVolume = 65567,     // 30..100: target level, linear x100 relative to the reference
+    kAgcVolume = 65567,     // 10..100: target level, linear x100 relative to the reference
     kAgcMaxScaler = 65568,  // 100..3000: maximum gain, linear x100
 
     kDynamicSystemEnable = 65569,
@@ -124,7 +124,8 @@ enum Param : int32_t {
     kBassEnable = 65574,
     kBassMode = 65575,  // 0 natural, 1 psychoacoustic, 2 subwoofer
     kBassFreq = 65576,  // Hz
-    kBassGain = 65577,  // 50..600 (50 per step of the app's boost table)
+    kBassGain = 65577,  // gain in dB x10, 0..170 (0.0-17.0 dB, stepless)
+    kBassHarmonics = 65589,  // virtual-bass harmonics x100, 0..50 (Pure bass+ only)
 
     kClarityEnable = 65578,
     kClarityMode = 65579,  // 0 natural, 1 exciter, 2 hi-fi extension
@@ -138,15 +139,15 @@ enum Param : int32_t {
     kAnalogEnable = 65584,
     kAnalogLevel = 65585,  // 0..2
 
-    kOutputVolume = 65586,  // linear gain x100 (1..200)
+    kOutputVolume = 65586,  // linear gain x100 (1..400)
     kChannelPan = 65587,    // -100..100
-    kLimiterCeiling = 65588,  // linear x100 (30..100)
+    kLimiterCeiling = 65588,  // linear x100 (10..100)
 
     kSpeakerOptimization = 65603,  // enables the speaker correction (kSpeakerProfile)
 
     kCompEnable = 65610,
     kCompThreshold = 65611,   // 0..100 -> -60..0 dB
-    kCompRatio = 65612,       // 0..100 -> 1:1..20:1
+    kCompRatio = 65612,       // 0..100 -> 1:1..8:1 (musical curve, 50 % = 3.5:1)
     kCompKnee = 65613,        // 0..100 -> 0..24 dB
     kCompAutoKnee = 65614,
     kCompGain = 65615,        // 0..100 -> 0..24 dB makeup

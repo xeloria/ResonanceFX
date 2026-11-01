@@ -52,6 +52,11 @@ for d in "$MODPATH/system/lib/soundfx" "$MODPATH/system/lib64/soundfx"; do
 done
 [ -d "$MODPATH/system/vendor/etc" ] && \
     find "$MODPATH/system/vendor/etc" -type f -name 'audio_effects*' -exec chcon u:object_r:vendor_configs_file:s0 {} \;
+# Patched configs staged outside vendor/etc (system_ext, product, odm overlays) get the same
+# permission treatment now, not only on the first post-fs-data pass.
+find "$MODPATH/system" -type f \( -path '*/system_ext/etc/*' -o -path '*/product/etc/*' -o -path '*/odm/etc/*' \) \
+    -name 'audio_effects*' -exec chcon u:object_r:system_file:s0 {} \; 2>/dev/null
+find "$MODPATH/system/vendor/odm/etc" -type f -name 'audio_effects*' -exec chcon u:object_r:vendor_configs_file:s0 {} \; 2>/dev/null
 for f in "$MODPATH"/*.sh; do chmod 0755 "$f"; done
 
 rfx_print "- Done. Reboot to activate."

@@ -118,7 +118,12 @@ class Applier(
         try {
             when (control.kind) {
                 FileControl.Kind.DDC -> {
-                    if (file == null) return
+                    if (file == null) {
+                        // "None" (or a deleted profile) must clear the engine's coefficients, like
+                        // the kernel does — the old correction would otherwise keep being applied.
+                        fx.set(Params.DDC_COEFFICIENTS, Codec.ddc(floatArrayOf()))
+                        return
+                    }
                     fx.set(Params.DDC_COEFFICIENTS, Codec.ddc(Assets.parseVdc(file.readText())))
                 }
                 FileControl.Kind.KERNEL -> {
@@ -126,7 +131,13 @@ class Applier(
                         fx.clearKernel()
                         return
                     }
-                    val rate = fx.getInt(Params.GET_SAMPLING_RATE)?.takeIf { it in 8000..384000 } ?: 48000
+                    // Resample only against a live rate from the engine: until the framework sends
+                    // EFFECT_CMD_CONFIGURE the engine still reports its 48 kHz default, and a
+                    // kernel resampled against that plays frequency-shifted on 44.1/96 kHz output.
+                    val rate = fx.getInt(Params.GET_SAMPLING_RATE)?.takeIf { it in 8000..384000 } ?: run {
+                        lastAssetError = "${control.label}: waiting for the output sample rate"
+                        return
+                    }
                     val kernel = Assets.resample(Assets.parseWav(file.readBytes()), rate)
                     // Rate is part of the identity: a new output rate must trigger a re-upload.
                     fx.uploadKernel("$name@$rate", kernel.channels, kernel.samples)

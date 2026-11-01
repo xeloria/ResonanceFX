@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -94,7 +95,12 @@ fun hzLabel(hz: Float): String = when {
 fun EqCurve(gains: FloatArray, bandsHz: List<Float>, onChange: (FloatArray) -> Unit) {
     var dragBand by remember { mutableIntStateOf(-1) }
     val scheme = MaterialTheme.colorScheme
-    val key = gains.joinToString()
+    // The gesture handlers must not restart when gains change — keying them on the value would
+    // cancel detectDragGestures on the first committed step and kill the drag. The latest
+    // gains/onChange are read through updated-state refs instead.
+    val bandCount = gains.size
+    val currentGains by rememberUpdatedState(gains)
+    val currentOnChange by rememberUpdatedState(onChange)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Canvas(
@@ -102,8 +108,8 @@ fun EqCurve(gains: FloatArray, bandsHz: List<Float>, onChange: (FloatArray) -> U
                 .fillMaxWidth()
                 .height(180.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .pointerInput(key) {
-                    fun bandAt(x: Float) = ((x / size.width) * gains.size).toInt().coerceIn(0, gains.size - 1)
+                .pointerInput(bandCount) {
+                    fun bandAt(x: Float) = ((x / size.width) * bandCount).toInt().coerceIn(0, bandCount - 1)
                     fun gainAt(y: Float) = (((0.5f - y / size.height) * 2 * EQ_RANGE_DB) * 2).roundToInt() / 2f
                     detectDragGestures(
                         onDragStart = { dragBand = bandAt(it.x) },
@@ -111,18 +117,19 @@ fun EqCurve(gains: FloatArray, bandsHz: List<Float>, onChange: (FloatArray) -> U
                         onDragCancel = { dragBand = -1 },
                     ) { change, _ ->
                         val band = dragBand.takeIf { it >= 0 } ?: return@detectDragGestures
+                        val gainsNow = currentGains
                         val g = gainAt(change.position.y).coerceIn(-EQ_RANGE_DB, EQ_RANGE_DB)
-                        if (abs(g - gains[band]) >= 0.5f) {
-                            gains[band] = g
-                            onChange(gains.copyOf())
+                        if (abs(g - gainsNow[band]) >= 0.5f) {
+                            gainsNow[band] = g
+                            currentOnChange(gainsNow.copyOf())
                         }
                     }
                 }
-                .pointerInput(key) {
+                .pointerInput(bandCount) {
                     detectTapGestures(onDoubleTap = {
-                        val band = ((it.x / size.width) * gains.size).toInt().coerceIn(0, gains.size - 1)
-                        gains[band] = 0f
-                        onChange(gains.copyOf())
+                        val band = ((it.x / size.width) * bandCount).toInt().coerceIn(0, bandCount - 1)
+                        currentGains[band] = 0f
+                        currentOnChange(currentGains.copyOf())
                     })
                 },
         ) {
@@ -221,22 +228,23 @@ fun FileRow(control: FileControl, value: String, onChange: (String) -> Unit) {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val name = runCatching { repo.importAsset(control.kind, uri) }.getOrElse {
+        // Stage first, validate second: a failed import must not touch an existing valid asset
+        // that happens to share the same (sanitized) name.
+        val staged = runCatching { repo.stageAsset(control.kind, uri) }.getOrElse {
             Toast.makeText(context, "Import failed: ${it.message}", Toast.LENGTH_LONG).show()
             return@rememberLauncherForActivityResult
         }
         val error = runCatching {
-            val file = repo.assetFile(control.kind, name)!!
             when (control.kind) {
-                FileControl.Kind.DDC -> Assets.parseVdc(file.readText())
-                FileControl.Kind.KERNEL -> Assets.parseWav(file.readBytes())
+                FileControl.Kind.DDC -> Assets.parseVdc(staged.readText())
+                FileControl.Kind.KERNEL -> Assets.parseWav(staged.readBytes())
             }
         }.exceptionOrNull()
         if (error != null) {
-            repo.deleteAsset(control.kind, name)
+            repo.discardAsset(staged)
             Toast.makeText(context, "Not a valid file: ${error.message}", Toast.LENGTH_LONG).show()
         } else {
-            onChange(name)
+            onChange(repo.commitAsset(control.kind, staged))
         }
         refresh++
     }

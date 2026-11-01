@@ -21,8 +21,6 @@ modern Material You app.
   to it, speaker protection (an excursion limiter that holds back bass a small driver can't
   play, or limited at each band's measured distortion point) and speaker widening (crosstalk
   cancellation for closely spaced speakers, following how the device is held).
-- **Blind test**: a built-in ABX test, loudness-matched and time-aligned, to check whether you
-  really hear an effect.
 - **Measured, not claimed**: every effect's measured response, distortion and loudness change
   ships in the app and with each release.
 - **Per-device profiles** that switch automatically for speaker, wired, every Bluetooth device

@@ -6,6 +6,13 @@ MODDIR=${0%/*}
 RFX_LOGFILE=/data/adb/resonancefx/logs/boot.log
 . "$MODDIR/common.sh"
 
+if rfx_in_recovery; then
+    # Never touch mounts or descriptions from a recovery session: the target system is not
+    # running and any bind would die with the session.
+    rfx_log "service: recovery session, skipping"
+    exit 0
+fi
+
 late_fix=0
 if [ ! -f "$RFX_STATE/post_mount_ran" ]; then
     # Magisk (or an old KernelSU without post-mount). Magic mount almost always works, but if
@@ -25,7 +32,11 @@ sleep 5
 missing="$(rfx_configs_missing)"
 total="$(wc -l < "$RFX_STATE/configs" 2>/dev/null | tr -d ' ')"
 mode="overlay"
-[ -f "$RFX_STATE/lib_mode" ] || [ -f "$RFX_STATE/cfg_mode" ] && mode="bind"
+# Two explicit conditions: the shell parses "[ a ] || [ b ] && c" as "(a || b) && c", which
+# would report "bind" when only part of the system ended up bind-mounted.
+if [ -f "$RFX_STATE/lib_mode" ] || [ -f "$RFX_STATE/cfg_mode" ]; then
+    mode="bind"
+fi
 
 logcat -d -b main -b system 2>/dev/null | \
     grep -iE "resonancefx|EffectsFactory|EffectsConfig|EffectConfig|audio_effects|soundfx" | \

@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Xeloria
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -37,7 +39,31 @@ private:
 
     void readInput(const audio_buffer_t* in, int frames);
     void writeOutput(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate);
-    void passThrough(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate);
+    void passThrough(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate,
+                     uint8_t inFormat, uint8_t outFormat, uint32_t channelCount);
+    /// TPDF dither + first-order error-feedback noise shaping, quantised to 16 bit.
+    inline int16_t quantize16(float x, unsigned channel) {
+        const float v = x * 32768.0f - ditherErr_[channel];
+        ditherState_ = ditherState_ * 1664525u + 1013904223u;
+        const float a = static_cast<float>(ditherState_ >> 8) * (1.0f / 16777216.0f);
+        ditherState_ = ditherState_ * 1664525u + 1013904223u;
+        const float b = static_cast<float>(ditherState_ >> 8) * (1.0f / 16777216.0f);
+        float q = std::floor(v + (a - b) + 0.5f);
+        q = q < -32768.0f ? -32768.0f : (q > 32767.0f ? 32767.0f : q);
+        ditherErr_[channel] = clampv(q - v, -4.0f, 4.0f);
+        return static_cast<int16_t>(q);
+    }
+
+    /// Everything the try-lock-failed pass-through path needs, published under the mutex so the
+    /// audio thread never reads mutex-owned config_ while a command thread mutates it.
+    struct BypassSnapshot {
+        audio_buffer_t inBuffer{}, outBuffer{};
+        bool inFallback = false, outFallback = false;
+        bool enabled = false, disabled = true;
+        uint8_t inFormat = 0, outFormat = 0, accessMode = 0;
+        uint32_t channels = 2;
+    };
+    void publishBypass();
 
     int32_t setAbx(int32_t id, int32_t value);
 
@@ -57,6 +83,12 @@ private:
     Disable disable_ = Disable::kUnknown;
     std::string disableMessage_;
     std::vector<float> left_, right_;
+    // Dither/noise-shaping state for 16-bit output (one error-feedback state per channel).
+    uint32_t ditherState_ = 0x12345678u;
+    float ditherErr_[2] = {0.0f, 0.0f};
+    // Published by the command path for the lock-free pass-through; use atomic_load/store
+    // (GCC 12's atomic<shared_ptr> isn't available in the NDK's and host libstdc++).
+    std::shared_ptr<const BypassSnapshot> bypass_;
 };
 
 }  // namespace rfx::android

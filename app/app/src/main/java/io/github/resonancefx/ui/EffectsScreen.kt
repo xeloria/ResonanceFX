@@ -22,6 +22,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -92,13 +93,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun EffectsScreen() {
     val repo = App.instance.repository
     val settings by repo.settings.collectAsStateWithLifecycle()
     val route by repo.route.collectAsStateWithLifecycle()
     var showAdvanced by rememberSaveable { mutableStateOf(false) }
-    var blindTest by remember { mutableStateOf(false) }
     val status = rememberDriverStatus()
     val context = LocalContext.current
 
@@ -119,13 +120,12 @@ fun EffectsScreen() {
             )
         }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // FlowRow: a third chip added when almost no width is left would otherwise be laid
+            // out in the sliver that remains, wrapping its label into a tall invisible column
+            // and pushing every following card down (the "huge gap" below the filter row).
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = showAdvanced, onClick = { showAdvanced = !showAdvanced }, label = { Text("Advanced modules") })
-                FilterChip(selected = false, onClick = {}, enabled = false, label = { Text(route.label) })
-                val abx = status?.features?.let { it and Params.FEATURE_ABX != 0 } == true
-                if (abx && settings.bool(Catalog.KEY_MASTER)) {
-                    FilterChip(selected = blindTest, onClick = { blindTest = true }, label = { Text("Blind test") })
-                }
+                FilterChip(selected = false, onClick = {}, enabled = false, label = { Text(route.label, maxLines = 1) })
             }
         }
         // Until the engine reports its features (not attached yet), show everything.
@@ -138,34 +138,24 @@ fun EffectsScreen() {
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
-    if (blindTest) AbxDialog(settings, status?.features ?: 0) { blindTest = false }
-}
-
-/** Polls the driver while the screen is visible. */
-@Composable
-fun rememberDriverStatus(intervalMs: Long = 2000): DriverStatus? {
-    var status by remember { mutableStateOf<DriverStatus?>(null) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            status = withContext(Dispatchers.IO) { runCatching { DriverStatus.query() }.getOrNull() }
-            delay(intervalMs)
-        }
-    }
-    return status
 }
 
 @Composable
 private fun HeroCard(on: Boolean, profile: String, status: DriverStatus?, onToggle: (Boolean) -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val transition = rememberInfiniteTransition(label = "hero")
-    val phase by transition.animateFloat(
+    // Shimmer and pulse only animate while effects are on; an always-running infinite
+    // transition on the main tab would keep recomposing (and costing battery) when idle.
+    val transition = if (on) rememberInfiniteTransition(label = "hero") else null
+    val phaseState = transition?.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing), RepeatMode.Reverse), label = "phase",
     )
-    val pulse by transition.animateFloat(
+    val pulseState = transition?.animateFloat(
         initialValue = 0.35f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse",
     )
+    val phase = phaseState?.value ?: 0f
+    val pulse = pulseState?.value ?: 1f
     val glow by animateFloatAsState(if (on) 1f else 0f, tween(600), label = "glow")
     val start by animateColorAsState(if (on) scheme.primaryContainer else scheme.surfaceContainerHigh, label = "start")
     val end by animateColorAsState(if (on) scheme.secondaryContainer else scheme.surfaceContainer, label = "end")

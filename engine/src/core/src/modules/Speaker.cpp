@@ -49,6 +49,14 @@ void SpeakerProtector::design() {
     const double xo = 1.4 * f0;
     xo_.configure(&xo, 1, fs_);
     bands_.configure(kCrossovers, kBands - 1, fs_);
+    // Reconfigured coefficients mean stale filter state (prepare()/reset() re-establishes them
+    // besides this path, but set() redesigns in place while audio runs).
+    subL_.reset();
+    subR_.reset();
+    excL_.reset();
+    excR_.reset();
+    xo_.reset();
+    bands_.reset();
 }
 
 namespace {

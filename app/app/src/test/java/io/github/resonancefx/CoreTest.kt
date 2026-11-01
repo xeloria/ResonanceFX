@@ -165,8 +165,22 @@ class SettingsTest {
     @Test fun clampsImportedValuesAndIgnoresUnknownKeys() {
         val json = JSONObject().put("values", JSONObject().put("bass.gain", 999).put("cure.strength", -3).put("nope", 1))
         val s = Settings.fromJson(json)
-        assertEquals(11, s.int("bass.gain"))
+        assertEquals(170, s.int("bass.gain"))
         assertEquals(0, s.int("cure.strength"))
+    }
+
+    @Test fun migratesV1BassGainIndexToDbX10() {
+        val legacy = JSONObject().put("format", "resonancefx.settings.v1")
+            .put("values", JSONObject().put("bass.gain", 6))
+        assertEquals(130, Settings.fromJson(legacy).int("bass.gain")) // step 6 was 13.0 dB
+
+        val legacyMin = JSONObject().put("format", "resonancefx.settings.v1")
+            .put("values", JSONObject().put("bass.gain", 0))
+        assertEquals(35, Settings.fromJson(legacyMin).int("bass.gain")) // step 0 was 3.5 dB
+
+        val current = JSONObject().put("format", "resonancefx.settings.v2")
+            .put("values", JSONObject().put("bass.gain", 6))
+        assertEquals(6, Settings.fromJson(current).int("bass.gain")) // v2 passes through (0.6 dB)
     }
 
     @Test fun diffListsOnlyChangedKeys() {

@@ -56,9 +56,42 @@ private:
     struct Stage {
         bool target = false;
         float mix = 0.0f;
+        int latencySeen = -1;  // module latency the aligner was configured for
+        void* align = nullptr; // borrowed Aligner, nullptr for latency-free or unavailable
     };
+
+    // While a latency-bearing module crossfades, the dry reference must be delayed by the
+    // module's latency, otherwise the fade mixes a time-shifted copy of the program (a flanged
+    // transient) and the signal time-shifts once the fade completes. A small pool of rings
+    // covers the few stages that can crossfade at once; exhaustion falls back to unaligned.
+    struct Aligner {
+        static constexpr int kCap = 2048;  // power of two; exceeds any module latency (STFT 1024)
+        float laneL[kCap] = {}, laneR[kCap] = {};
+        int pos = 0;
+        int delay = 0;
+        int fed = 0;  // samples pushed since acquisition (delay history accumulated?)
+        bool primed = false;
+        bool inUse = false;
+
+        void feed(const float* l, const float* r, int n) {
+            for (int i = 0; i < n; ++i) {
+                laneL[pos] = l[i];
+                laneR[pos] = r[i];
+                pos = (pos + 1) & (kCap - 1);
+            }
+            if (fed < kCap) {
+                fed += n;
+                if (fed > kCap) fed = kCap;
+            }
+        }
+    };
+    static constexpr size_t kAligners = 4;
+    void acquireAlign(Stage& st, int latency);
+    void releaseAlign(Stage& st);
+
     template <class Fn, class Reset>
-    void run(Stage& st, float* l, float* r, int n, Fn&& fn, Reset&& reset);
+    void run(Stage& st, float* l, float* r, int n, int latency, Fn&& fn, Reset&& reset);
+
     void processBlock(float* l, float* r, int n);
     void processModules(float* l, float* r, int n);
     void master(float* l, float* r, int n);
@@ -82,6 +115,9 @@ private:
     double fs_ = 48000.0;
     float stageStep_ = 0.0f;
     std::vector<float> dryL_, dryR_;
+    // Latency-compensation rings, borrowed by crossfading stages; only touched while the
+    // processing lock is held, so no atomics are needed.
+    std::array<Aligner, kAligners> aligners_{};
     std::atomic<uint64_t> lastProcessMs_{0};
 #ifdef RFX_DIAG
     void diagnostics(const float* l, const float* r, int n);
@@ -126,7 +162,7 @@ private:
 
     // ---- parameter state (protocol units) ----
     struct {
-        int mode = 0, freq = 70, gain = 50;
+        int mode = 0, freq = 70, gain = 35, harmonics = 25;  // gain: dB x10; harmonics: x100
         bool subwoofer = false;
     } bass_p_;
     struct {

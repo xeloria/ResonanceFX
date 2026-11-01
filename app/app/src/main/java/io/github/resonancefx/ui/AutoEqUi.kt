@@ -81,7 +81,7 @@ fun AutoEqRow(value: String, strength: Int, onChange: (String) -> Unit) {
     val db = rememberAutoEqDatabase()
     var picking by remember { mutableStateOf(false) }
     val profile = db?.find(value)
-    val status = rememberDriverStatus(5000)
+    val status = rememberDriverStatus()
     // Older engines don't answer GET_FEATURES at all (null), which also means no parametric EQ.
     val unsupported = status?.registered == true && (status.features ?: 0) and Params.FEATURE_PARAMETRIC_EQ == 0
 

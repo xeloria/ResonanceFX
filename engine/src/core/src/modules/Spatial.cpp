@@ -8,96 +8,6 @@
 namespace rfx {
 
 // ---------------------------------------------------------------------------
-// StereoImage
-// ---------------------------------------------------------------------------
-void StereoImage::prepare(double fs) {
-    fs_ = fs;
-    int size = 1;
-    while (size < static_cast<int>(0.031 * fs) + 2) size <<= 1;
-    decorBuf_.assign(size, 0.0f);
-    haasBuf_.assign(size, 0.0f);
-    decorMask_ = haasMask_ = size - 1;
-    // Lauridsen pseudo-stereo: ~12 ms keeps the comb teeth dense and the effect spacious.
-    decorDelay_ = static_cast<int>(0.012 * fs);
-    decorHp_ = designRbj(FilterType::HighPass, 200.0, 0.0, 0.7071, fs_);
-    // Re-apply the current settings with every sample-rate-dependent design forced.
-    const Settings keep = s_;
-    s_.bassMonoHz = -1.0f;
-    s_.lowXover = -1.0f;
-    set(keep);
-    reset();
-}
-
-void StereoImage::reset() {
-    s1_.reset();
-    s2_.reset();
-    dh1_.reset();
-    dh2_.reset();
-    xo_.reset();
-    std::fill(decorBuf_.begin(), decorBuf_.end(), 0.0f);
-    std::fill(haasBuf_.begin(), haasBuf_.end(), 0.0f);
-    pos_ = 0;
-    width_.snap(s_.width);
-    decor_.snap(s_.decorrelate);
-}
-
-void StereoImage::set(const Settings& s) {
-    const bool redesign = s.bassMonoHz != s_.bassMonoHz;
-    const bool xover = s.lowXover != s_.lowXover || s.highXover != s_.highXover;
-    s_ = s;
-    s_.width = clampv(s_.width, 0.0f, 3.0f);
-    width_.setTarget(s_.width, static_cast<int>(0.03 * fs_));
-    decor_.setTarget(clampv(s_.decorrelate, 0.0f, 1.0f), static_cast<int>(0.03 * fs_));
-    if (redesign) {
-        hp_ = s_.bassMonoHz > 0.0f ? designRbj(FilterType::HighPass, clampv(s_.bassMonoHz, 20.0f, 1000.0f), 0.0,
-                                              0.7071, fs_)
-                                   : BiquadCoeffs{};
-    }
-    const bool wasBanded = bandWidths_;
-    bandWidths_ = s_.widthLow != 1.0f || s_.widthMid != 1.0f || s_.widthHigh != 1.0f;
-    if (xover || (bandWidths_ && !wasBanded)) {
-        const double f[2] = {clampv(static_cast<double>(s_.lowXover), 40.0, 2000.0),
-                             clampv(static_cast<double>(s_.highXover), 500.0, 0.4 * fs_)};
-        xo_.configure(f, 2, fs_);
-    }
-    if (!haasBuf_.empty()) haasDelay_ = clampv(static_cast<int>(std::lround(std::fabs(s_.haasMs) * 1e-3 * fs_)), 0, haasMask_);
-}
-
-void StereoImage::process(float* left, float* right, int n) {
-    const bool mono = s_.bassMonoHz > 0.0f;
-    const bool decor = decor_.value > 0.0f || decor_.ramping();
-    const bool haas = haasDelay_ > 0;
-    double bl[3], br[3];
-    for (int i = 0; i < n; ++i) {
-        const double m = 0.5 * (left[i] + right[i]);
-        double s = 0.5 * (left[i] - right[i]);
-        if (bandWidths_) {
-            xo_.split(s, 0.0, bl, br);
-            s = s_.widthLow * bl[0] + s_.widthMid * bl[1] + s_.widthHigh * bl[2];
-        }
-        if (mono) s = biquadTick(hp_, s2_, biquadTick(hp_, s1_, s));  // LR4 high-pass on side
-        s *= width_.next();
-        const float dAmt = decor_.next();
-        if (decor) {
-            // Complementary combs from the (bass-free) mid: L gets +d, R gets -d, so L+R is unchanged.
-            const double mh = biquadTick(decorHp_, dh2_, biquadTick(decorHp_, dh1_, m));
-            decorBuf_[pos_ & decorMask_] = static_cast<float>(mh);
-            s += 0.7 * dAmt * decorBuf_[(pos_ - decorDelay_) & decorMask_];
-        }
-        float l = static_cast<float>(m + s);
-        float r = static_cast<float>(m - s);
-        if (haas) {
-            float& delayed = s_.haasMs > 0.0f ? r : l;
-            haasBuf_[pos_ & haasMask_] = delayed;
-            delayed = haasBuf_[(pos_ - haasDelay_) & haasMask_];
-        }
-        pos_ = (pos_ + 1) & 0x3FFFFFFF;
-        left[i] = l;
-        right[i] = r;
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Crossfeed
 // ---------------------------------------------------------------------------
 double Crossfeed::itdSeconds(double angleDeg, double a) {
@@ -278,6 +188,7 @@ void Reverb::reset() {
     }
     std::fill(pre_.begin(), pre_.end(), 0.0f);
     writePos_ = 0;
+    lfoPhase_[0] = lfoPhase_[1] = 0.0;  // modulated lines must restart in sync with the tremsolo/LFO path
     inHpS_.reset();
     inLpS_.reset();
     wet_.snap(wet_.target);

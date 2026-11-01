@@ -156,7 +156,7 @@ fun PresetsScreen() {
 
 @Composable
 fun StatusScreen() {
-    val status = rememberDriverStatus(1500)
+    val status = rememberDriverStatus()
     val context = LocalContext.current
     var showMeasurements by remember { mutableStateOf(false) }
     if (showMeasurements) MeasurementsDialog { showMeasurements = false }

@@ -50,6 +50,19 @@ rfx_root_impl() {
 
 rfx_api() { getprop ro.build.version.sdk; }
 
+# True in a recovery session (module flashing on a ROM, or a recovery-mode boot). Guarding the
+# mount stages against this avoids binds that die with the session and mis-reported boot state.
+rfx_in_recovery() {
+    [ "$RECOVERYMODE" = true ] && return 0
+    [ "$BOOTMODE" = true ] && return 1  # Magisk says we are in a normal boot
+    [ -n "$(getprop ro.twrp.version 2>/dev/null)" ] && return 0
+    [ -n "$(getprop ro.orangefox.version 2>/dev/null)" ] && return 0
+    [ -n "$(getprop ro.skydragon.version 2>/dev/null)" ] && return 0
+    [ "$(getprop ro.bootmode 2>/dev/null)" = "recovery" ] && return 0
+    [ "$(getprop init.svc.recovery 2>/dev/null)" != "" ] && return 0
+    return 1
+}
+
 # Space separated "<libdir> <abi>" pairs the device can load effect libraries from.
 # A 64-bit device may still run a 32-bit audio HAL (common on Qualcomm), so the 32-bit
 # library is installed whenever the device has any 32-bit userspace.
@@ -344,6 +357,10 @@ rfx_bind_libraries() {
             chmod 0644 "$stage/$RFX_LIB"
             chcon "$(rfx_context_of "$target")" "$stage" 2>/dev/null
             chcon "$(rfx_lib_context "$target/")" "$stage/$RFX_LIB" 2>/dev/null
+            # Never stack a second bind on the node: the old lower mount would keep pointing at
+            # a stage directory we are about to recreate, leaving a mount sourced from a deleted
+            # file after cleanup.
+            umount "$target" 2>/dev/null
             if mount --bind "$stage" "$target"; then
                 rfx_log "bind-mounted library dir $target"
                 echo bind > "$RFX_STATE/lib_mode"
@@ -360,6 +377,9 @@ rfx_bind_configs() {
     while IFS='|' read -r cfg staged; do
         [ -f "$staged" ] || continue
         cmp -s "$staged" "$cfg" && continue
+        # Drop any bind left from a previous pass before mounting a fresh one (see
+        # rfx_bind_libraries: stacked binds outlive their stage file).
+        umount "$cfg" 2>/dev/null
         if mount --bind "$staged" "$cfg"; then
             rfx_log "bind-mounted $cfg"
             echo bind > "$RFX_STATE/cfg_mode"
@@ -410,14 +430,18 @@ rfx_ensure_mounted() {
 }
 
 rfx_unmount_all() {
-    if [ -f "$RFX_STATE/configs" ]; then
-        while IFS='|' read -r cfg staged; do
-            umount "$cfg" 2>/dev/null
-        done < "$RFX_STATE/configs"
-    fi
-    for pair in $(rfx_lib_targets | tr ' ' ':'); do
-        libdir="${pair%%:*}"
-        for part in $(rfx_lib_partitions); do umount "$part/$libdir/soundfx" 2>/dev/null; done
+    # Two passes: if a bind ever got stacked (an old lower mount under a new one), a single
+    # umount only removes the top layer and the stage dir of the lower one is deleted next.
+    for _pass in 1 2; do
+        if [ -f "$RFX_STATE/configs" ]; then
+            while IFS='|' read -r cfg staged; do
+                umount "$cfg" 2>/dev/null
+            done < "$RFX_STATE/configs"
+        fi
+        for pair in $(rfx_lib_targets | tr ' ' ':'); do
+            libdir="${pair%%:*}"
+            for part in $(rfx_lib_partitions); do umount "$part/$libdir/soundfx" 2>/dev/null; done
+        done
     done
 }
 

@@ -67,6 +67,9 @@ private:
     double fs_ = 48000.0;
     std::vector<float> buf_;
     int pos_ = 0, delay_ = 0;
+    // Delay jumps would click, so the change lands in the middle of a short dip envelope.
+    float pendingDelayMs_ = -1.0f;
+    int dipRemaining_ = 0, dipTotal_ = 0;
 };
 
 /// Dynamic bass: a low shelf whose boost rises when the programme is light on bass and backs

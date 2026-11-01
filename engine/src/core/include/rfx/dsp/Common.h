@@ -44,7 +44,10 @@ struct LinearRamp {
 
     void snap(float v) { value = target = v; remaining = 0; step = 0.0f; }
     void setTarget(float t, int samples) {
-        if (t == target && remaining == 0 && value == t) return;
+        // An in-flight ramp toward this same target must not restart: callers that invoke
+        // this every buffer (gain/pan) would otherwise keep re-arming it, stretching the
+        // transition to an asymptotic crawl whenever buffers are shorter than the ramp.
+        if (t == target) return;
         target = t;
         if (samples <= 0) { snap(t); return; }
         remaining = samples;

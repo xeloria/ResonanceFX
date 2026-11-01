@@ -168,6 +168,7 @@ int32_t EffectContext::command(uint32_t code, uint32_t size, void* data, uint32_
         case EFFECT_CMD_SET_CONFIG:
             if (!data || size < sizeof(effect_config_t) || !reply || replyCap != sizeof(int32_t)) return -EINVAL;
             configure(*static_cast<const effect_config_t*>(data));
+            publishBypass();
             replyStatus(0);
             return 0;
         case EFFECT_CMD_GET_CONFIG:
@@ -193,6 +194,7 @@ int32_t EffectContext::command(uint32_t code, uint32_t size, void* data, uint32_
                 engine_.reset();
                 reference_.reset();
             }
+            publishBypass();
             replyStatus(0);
             return 0;
         case EFFECT_CMD_SET_PARAM: {
@@ -312,7 +314,7 @@ int32_t EffectContext::getParameter(const effect_param_t* p, effect_param_t* rep
         case kGetConfigured: return putInt(disable_ == Disable::kNone ? 1 : 0);
         case kGetStreaming: {
             using namespace std::chrono;
-            const uint64_t now = static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+            const uint64_t now = static_cast<uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
             const uint64_t last = engine_.lastProcessMs();
             return putInt(last != 0 && now >= last && now - last < 5000 ? 1 : 0);
         }
@@ -373,8 +375,19 @@ void EffectContext::readInput(const audio_buffer_t* in, int frames) {
 void EffectContext::writeOutput(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate) {
     auto* dst = static_cast<uint8_t*>(out->raw);
     const uint8_t of = config_.outputCfg.format;
+    // 16-bit output gets TPDF dither + noise shaping; every new value we write is quantised
+    // through it, so quiet passages no longer show quantisation harmonics.
+    const bool d16 = of == AUDIO_FORMAT_PCM_16_BIT;
     if (channels_ == 1) {
-        for (int i = 0; i < frames; ++i) store(dst, of, static_cast<size_t>(i), 0.5f * (left_[i] + right_[i]), accumulate);
+        for (int i = 0; i < frames; ++i) {
+            float v = 0.5f * (left_[i] + right_[i]);
+            if (accumulate) v += load(dst, of, static_cast<size_t>(i));
+            if (d16) {
+                reinterpret_cast<int16_t*>(dst)[i] = quantize16(v, 0);
+            } else {
+                store(dst, of, static_cast<size_t>(i), v, false);
+            }
+        }
         return;
     }
     // Surround/height channels pass through untouched (already in place when processing in place).
@@ -383,17 +396,28 @@ void EffectContext::writeOutput(const audio_buffer_t* in, audio_buffer_t* out, i
     const uint8_t inf = config_.inputCfg.format;
     for (int i = 0; i < frames; ++i) {
         const size_t frame = static_cast<size_t>(i) * channels_;
-        store(dst, of, frame, left_[i], accumulate);
-        store(dst, of, frame + 1, right_[i], accumulate);
+        float l = left_[i], r = right_[i];
+        if (accumulate) {
+            l += load(dst, of, frame);
+            r += load(dst, of, frame + 1);
+        }
+        if (d16) {
+            reinterpret_cast<int16_t*>(dst)[frame] = quantize16(l, 0);
+            reinterpret_cast<int16_t*>(dst)[frame + 1] = quantize16(r, 1);
+        } else {
+            store(dst, of, frame, l, false);
+            store(dst, of, frame + 1, r, false);
+        }
         if (copyExtra)
             for (uint32_t c = 2; c < channels_; ++c) store(dst, of, frame + c, load(src, inf, frame + c), accumulate);
     }
 }
 
-void EffectContext::passThrough(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate) {
-    const uint8_t inf = config_.inputCfg.format, of = config_.outputCfg.format;
+void EffectContext::passThrough(const audio_buffer_t* in, audio_buffer_t* out, int frames, bool accumulate,
+                                uint8_t inFormat, uint8_t outFormat, uint32_t channelCount) {
+    const uint8_t inf = inFormat, of = outFormat;
     if (in->raw == out->raw && !accumulate) return;
-    const size_t samples = static_cast<size_t>(frames) * channels_;
+    const size_t samples = static_cast<size_t>(frames) * channelCount;
     if (!accumulate && inf == of) {
         std::memmove(out->raw, in->raw, samples * sampleBytes(inf));
         return;
@@ -403,11 +427,51 @@ void EffectContext::passThrough(const audio_buffer_t* in, audio_buffer_t* out, i
     for (size_t i = 0; i < samples; ++i) store(dst, of, i, load(src, inf, i), accumulate);
 }
 
+// Everything the audio thread needs when a command holds the mutex. Called on the command
+// path only, so the allocation is off the audio thread.
+void EffectContext::publishBypass() {
+    auto snapshot = std::make_shared<BypassSnapshot>();
+    snapshot->inBuffer = config_.inputCfg.buffer;
+    snapshot->outBuffer = config_.outputCfg.buffer;
+    snapshot->inFallback = (config_.inputCfg.mask & EFFECT_CONFIG_BUFFER) != 0;
+    snapshot->outFallback = (config_.outputCfg.mask & EFFECT_CONFIG_BUFFER) != 0;
+    snapshot->enabled = enabled_;
+    snapshot->disabled = disable_ != Disable::kNone;
+    snapshot->inFormat = static_cast<uint8_t>(config_.inputCfg.format);
+    snapshot->outFormat = static_cast<uint8_t>(config_.outputCfg.format);
+    snapshot->accessMode = static_cast<uint8_t>(config_.outputCfg.accessMode);
+    snapshot->channels = channels_;
+    std::atomic_store_explicit(&bypass_, std::shared_ptr<const BypassSnapshot>(std::move(snapshot)),
+                               std::memory_order_release);
+}
+
 int32_t EffectContext::process(audio_buffer_t* in, audio_buffer_t* out) {
     std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
     if (lock.owns_lock()) {
         if (disable_ != Disable::kNone) return -EINVAL;
         if (!enabled_) return -ENODATA;
+    }
+    audio_buffer_t fallbackIn{}, fallbackOut{};
+    if (!lock.owns_lock()) {
+        // A command is running (e.g. an impulse response being rebuilt): pass through from the
+        // last published config copy instead of racing the mutex-protected config_.
+        const std::shared_ptr<const BypassSnapshot> snapshot = std::atomic_load_explicit(&bypass_, std::memory_order_acquire);
+        if (!snapshot || snapshot->disabled) return -EINVAL;
+        if (!snapshot->enabled) return -ENODATA;
+        if (!in && snapshot->inFallback) {
+            fallbackIn = snapshot->inBuffer;
+            in = &fallbackIn;
+        }
+        if (!out && snapshot->outFallback) {
+            fallbackOut = snapshot->outBuffer;
+            out = &fallbackOut;
+        }
+        if (!in || !out || !in->raw || !out->raw || in->frameCount != out->frameCount || in->frameCount == 0)
+            return -EINVAL;
+        const bool accumulate = snapshot->accessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE;
+        passThrough(in, out, static_cast<int>(in->frameCount), accumulate, snapshot->inFormat, snapshot->outFormat,
+                    snapshot->channels);
+        return 0;
     }
     if (!in && (config_.inputCfg.mask & EFFECT_CONFIG_BUFFER)) in = &config_.inputCfg.buffer;
     if (!out && (config_.outputCfg.mask & EFFECT_CONFIG_BUFFER)) out = &config_.outputCfg.buffer;
@@ -415,10 +479,6 @@ int32_t EffectContext::process(audio_buffer_t* in, audio_buffer_t* out) {
 
     const bool accumulate = config_.outputCfg.accessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE;
     const int total = static_cast<int>(in->frameCount);
-    if (!lock.owns_lock()) {
-        passThrough(in, out, total, accumulate);
-        return 0;
-    }
     // Work through the buffer in engine-sized pieces (no allocation on the audio thread).
     for (int done = 0; done < total; done += Engine::kMaxBlock) {
         const int n = std::min(Engine::kMaxBlock, total - done);

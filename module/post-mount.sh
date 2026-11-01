@@ -8,6 +8,8 @@ MODDIR=${0%/*}
 RFX_LOGFILE=/data/adb/resonancefx/logs/boot.log
 . "$MODDIR/common.sh"
 
+if rfx_in_recovery; then rfx_log "post-mount: recovery session, skipping"; exit 0; fi
+
 rfx_log "post-mount: verifying"
 rfx_ensure_mounted
 touch "$RFX_STATE/post_mount_ran"

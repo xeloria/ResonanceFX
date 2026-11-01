@@ -2,8 +2,8 @@
 // Copyright (C) 2026 Xeloria
 
 #pragma once
-// Short-time Fourier processing (weighted overlap-add) and the spectral effects built on it:
-// centre/ambience extraction and noise reduction.
+// Short-time Fourier processing (weighted overlap-add) and the spectral effect built on it:
+// centre/ambience extraction.
 
 #include <cstring>
 #include <vector>
@@ -93,32 +93,6 @@ private:
     std::vector<float> mask_;
     int k0_ = 0, k1_ = 0;
     float gc_ = 1.0f, ga_ = 1.0f, gamma_ = 2.0f;
-};
-
-/// Spectral noise reduction for hiss and steady background noise: noise power tracked per bin
-/// by minimum tracking with slow rise (after Martin 2001), decision-directed a-priori SNR and
-/// Wiener gain (Ephraim & Malah 1984) with a gain floor of -amount dB.  A tonal guard caps
-/// each bin's noise estimate at the local spectral minimum, so sustained notes survive.  One
-/// gain per bin is shared by both channels so the stereo image is preserved.
-class SpectralDenoiser {
-public:
-    struct Settings {
-        float amountDb = 12.0f, sensitivity = 0.5f;
-    };
-    void prepare(double sampleRate);
-    void reset();
-    void set(const Settings& s);
-    void process(float* left, float* right, int n);
-    int latency() const { return stft_.latency(); }
-
-private:
-    Settings s_;
-    double fs_ = 48000.0;
-    StftProcessor stft_;
-    std::vector<float> smooth_, noise_, gainPrev_, gammaPrev_, gain_, eff_;
-    int guard_ = 4;
-    int frames_ = 0;
-    float floor_ = 0.25f, beta_ = 1.0f, rise_ = 1.0005f;
 };
 
 }  // namespace rfx

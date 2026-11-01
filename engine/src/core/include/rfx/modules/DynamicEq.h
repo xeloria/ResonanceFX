@@ -20,8 +20,6 @@ struct DynamicBand {
     int mode = 0;            // 0 = act above threshold, 1 = act below threshold
 };
 
-int decodeDynamicBands(const float* v, int count, DynamicBand* out, int maxBands);
-
 /// Each band watches its own frequency region through a side-chain filter (band-pass for bells,
 /// low/high-pass for shelves) and moves its filter gain towards `rangeDb` as the side-chain
 /// level crosses the threshold (soft knee, ratio-controlled slope, attack/release smoothing).

@@ -121,29 +121,4 @@ private:
     float grDb_ = 0.0f;
 };
 
-/// TPDF dither + quantisation to 16 bit, optional first-order error-feedback noise shaping
-/// (pushes the requantisation noise towards high frequencies where hearing is less sensitive).
-class Dither {
-public:
-    void reset() { errL_ = errR_ = 0.0f; }
-    inline int16_t quantize(float x, int channel, bool dither, bool shaping) {
-        float& e = channel ? errR_ : errL_;
-        float v = x * 32768.0f;
-        if (shaping) v -= e;
-        const float d = dither ? (rnd() - rnd()) : 0.0f;
-        float q = std::floor(v + d + 0.5f);
-        q = q < -32768.0f ? -32768.0f : (q > 32767.0f ? 32767.0f : q);
-        if (shaping) e = clampv(q - v, -4.0f, 4.0f);
-        return static_cast<int16_t>(q);
-    }
-
-private:
-    inline float rnd() {
-        state_ = state_ * 1664525u + 1013904223u;
-        return static_cast<float>(state_ >> 8) * (1.0f / 16777216.0f);
-    }
-    uint32_t state_ = 0x12345678u;
-    float errL_ = 0.0f, errR_ = 0.0f;
-};
-
 }  // namespace rfx

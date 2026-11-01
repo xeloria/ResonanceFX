@@ -2,8 +2,7 @@
 // Copyright (C) 2026 Xeloria
 
 #pragma once
-// Spatial processing: stereo image (M/S width + mono bass), headphone crossfeed and an
-// 8-line feedback-delay-network reverb.
+// Spatial processing: headphone crossfeed and an 8-line feedback-delay-network reverb.
 
 #include <vector>
 
@@ -12,33 +11,6 @@
 #include "rfx/modules/Multiband.h"
 
 namespace rfx {
-
-class StereoImage {
-public:
-    struct Settings {
-        float width = 1.0f;
-        float bassMonoHz = 0.0f;
-        float haasMs = 0.0f;       // > 0 delays the right channel, < 0 the left (precedence effect)
-        float decorrelate = 0.0f;  // Lauridsen complementary-comb pseudo-stereo amount
-        float widthLow = 1.0f, widthMid = 1.0f, widthHigh = 1.0f;
-        float lowXover = 250.0f, highXover = 4000.0f;
-    };
-    void prepare(double sampleRate);
-    void reset();
-    void set(const Settings& s);
-    void process(float* left, float* right, int n);
-
-private:
-    Settings s_;
-    double fs_ = 48000.0;
-    LinearRamp width_, decor_;
-    BiquadCoeffs hp_, decorHp_;
-    BiquadState s1_, s2_, dh1_, dh2_;
-    LrCrossover xo_;
-    bool bandWidths_ = false;
-    std::vector<float> decorBuf_, haasBuf_;
-    int decorMask_ = 0, decorDelay_ = 0, haasMask_ = 0, haasDelay_ = 0, pos_ = 0;
-};
 
 /// Headphone crossfeed.
 ///  - Bauer / BS2B: first-order low-passed crossfeed plus a complementary high-boost on the

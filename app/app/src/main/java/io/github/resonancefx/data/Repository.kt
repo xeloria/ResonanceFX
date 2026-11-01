@@ -5,6 +5,7 @@ package io.github.resonancefx.data
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.core.content.edit
 import io.github.resonancefx.model.Catalog
 import io.github.resonancefx.model.Composite
@@ -101,22 +102,26 @@ class Repository(private val context: Context) {
     // ---- Presets ----------------------------------------------------------------------------
 
     fun savePreset(name: String) {
-        File(presetsDir, fileName(name)).writeText(_settings.value.toJson().put("name", name).toString(2))
+        val file = File(presetsDir, fileName(name))
+        file.writeText(_settings.value.toJson().put("name", name).toString(2))
+        val legacy = File(presetsDir, legacyFileName(name))
+        if (legacy.isFile && legacy.name != file.name) legacy.delete()
         _presets.value = listPresets()
     }
 
     fun applyPreset(name: String) {
-        val json = runCatching { JSONObject(File(presetsDir, fileName(name)).readText()) }.getOrNull() ?: return
+        val json = runCatching { JSONObject(presetFile(name).readText()) }.getOrNull() ?: return
         update { Settings.fromJson(json) }
     }
 
     fun deletePreset(name: String) {
-        File(presetsDir, fileName(name)).delete()
+        File(presetsDir, legacyFileName(name)).delete()
+        presetFile(name).delete()
         _presets.value = listPresets()
     }
 
     fun exportPreset(name: String, target: Uri) {
-        val text = File(presetsDir, fileName(name)).readText()
+        val text = presetFile(name).readText()
         context.contentResolver.openOutputStream(target, "wt")?.use { it.write(text.toByteArray()) }
     }
 
@@ -127,7 +132,10 @@ class Repository(private val context: Context) {
         val json = JSONObject(text)
         val name = json.optString("name").ifBlank { displayName(source).substringBeforeLast('.') }
         Settings.fromJson(json) // validate
-        File(presetsDir, fileName(name)).writeText(json.put("name", name).toString(2))
+        val file = File(presetsDir, fileName(name))
+        file.writeText(json.put("name", name).toString(2))
+        val legacy = File(presetsDir, legacyFileName(name))
+        if (legacy.isFile && legacy.name != file.name) legacy.delete()
         _presets.value = listPresets()
         return name
     }
@@ -142,7 +150,7 @@ class Repository(private val context: Context) {
     data class MeasuredSpeaker(val key: String, val label: String, val measurement: Composite.Measurement)
 
     fun otherMeasurements(): List<MeasuredSpeaker> {
-        val current = fileName(profileKey(_route.value))
+        val current = profileFile(profileKey(_route.value)).name
         val labels = labels()
         return profilesDir.listFiles { f -> f.extension == "json" && f.name != current }.orEmpty().mapNotNull { file ->
             val settings = runCatching { Settings.fromJson(JSONObject(file.readText())) }.getOrNull() ?: return@mapNotNull null
@@ -170,15 +178,39 @@ class Repository(private val context: Context) {
         name.takeIf { it.isNotBlank() }?.let { File(assetDir(kind), it) }?.takeIf { it.isFile }
 
     fun listAssets(kind: FileControl.Kind): List<String> =
-        assetDir(kind).listFiles().orEmpty().filter { it.isFile }.map { it.name }.sortedBy { it.lowercase() }
+        assetDir(kind).listFiles().orEmpty().filter { it.isFile && !it.name.endsWith(STAGED_SUFFIX) }
+            .map { it.name }.sortedBy { it.lowercase() }
 
-    /** Copies a picked file into app storage; validation happens in the caller. Returns its name. */
-    fun importAsset(kind: FileControl.Kind, source: Uri): String {
-        val name = displayName(source).replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
-        val dest = File(assetDir(kind), name)
-        context.contentResolver.openInputStream(source)?.use { input -> dest.outputStream().use { input.copyTo(it) } }
+    /**
+     * Copies a picked file into a uniquely staged file; the caller parses it and then either
+     * publishes it with [commitAsset] or throws it away with [discardAsset]. A failed import can
+     * therefore never overwrite an existing, valid asset of the same name.
+     */
+    fun stageAsset(kind: FileControl.Kind, source: Uri): File {
+        val dir = assetDir(kind)
+        // Clean up files staged by a crashed attempt more than a day ago.
+        dir.listFiles()?.filter { it.name.endsWith(STAGED_SUFFIX) && it.lastModified() < System.currentTimeMillis() - 86_400_000 }
+            ?.forEach { it.delete() }
+        val base = displayName(source).replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
+        var staged = File(dir, "$base$STAGED_SUFFIX")
+        var i = 1
+        while (staged.exists()) staged = File(dir, "$base(${++i})$STAGED_SUFFIX")
+        context.contentResolver.openInputStream(source)?.use { input -> staged.outputStream().use { input.copyTo(it) } }
             ?: error("Can't read file")
+        return staged
+    }
+
+    /** Publishes a staged file under its final name, replacing any earlier asset of that name. */
+    fun commitAsset(kind: FileControl.Kind, staged: File): String {
+        val name = staged.name.removeSuffix(STAGED_SUFFIX)
+        val dest = File(assetDir(kind), name)
+        if (!staged.renameTo(dest)) staged.copyTo(dest, overwrite = true).let { staged.delete() }
         return name
+    }
+
+    /** Throws away an asset staged by [stageAsset], e.g. because parsing failed. */
+    fun discardAsset(staged: File) {
+        staged.delete()
     }
 
     fun deleteAsset(kind: FileControl.Kind, name: String) {
@@ -191,22 +223,70 @@ class Repository(private val context: Context) {
 
     /** A route seen for the first time starts from [fallback] (the last-used profile). */
     private fun load(profile: String, fallback: Settings = Settings.DEFAULT): Settings {
-        val file = File(profilesDir, fileName(profile))
+        val file = profileFile(profile)
         return runCatching { Settings.fromJson(JSONObject(file.readText())) }.getOrNull() ?: fallback
     }
 
     private fun save(profile: String, settings: Settings) {
+        val json = settings.toJson().toString(2)
         val file = File(profilesDir, fileName(profile))
         val tmp = File(profilesDir, "${file.name}.tmp")
-        tmp.writeText(settings.toJson().toString(2))
-        tmp.renameTo(file)
+        try {
+            tmp.writeText(json)
+            // Rename is atomic, but it can fail (backup/AV scanners holding the target); fall
+            // back to an in-place write instead of silently losing the profile.
+            if (!tmp.renameTo(file)) {
+                file.writeText(json)
+                tmp.delete()
+            }
+            // Migrated: the legacy-named profile is superseded by the hashed one.
+            val legacy = File(profilesDir, legacyFileName(profile))
+            if (legacy.isFile && legacy.name != file.name) legacy.delete()
+        } catch (e: Exception) {
+            Log.w(TAG, "Can't save profile \"$profile\"", e)
+            tmp.delete()
+        }
     }
 
-    private fun fileName(name: String) = name.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json"
+    private fun legacyFileName(name: String) = name.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json"
+
+    /**
+     * The old naming sanitized every profile/preset name, so different outputs ("Galaxy Buds
+     * Pro" and "Galaxy-Buds-Pro") mapped onto one file and silently shared a profile. New
+     * writes use the exact name (a short hash appended when sanitization actually lost
+     * characters); reading accepts the legacy file until then, so nothing is lost on update.
+     */
+    private fun fileName(name: String): String {
+        val clean = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        if (clean == name) return "$clean.json"
+        val digest = java.security.MessageDigest.getInstance("SHA-1").digest(name.toByteArray(Charsets.UTF_8))
+        val hex = digest.take(3).joinToString("") { "%02x".format(java.util.Locale.ROOT, it) }
+        return "$clean-$hex.json"
+    }
+
+    private fun profileFile(profile: String): File {
+        val file = File(profilesDir, fileName(profile))
+        if (file.isFile) return file
+        return File(profilesDir, legacyFileName(profile)).takeIf { it.isFile } ?: file
+    }
+
+    private fun presetFile(name: String): File {
+        val file = File(presetsDir, fileName(name))
+        if (file.isFile) return file
+        return File(presetsDir, legacyFileName(name)).takeIf { it.isFile } ?: file
+    }
 
     private fun displayName(uri: Uri): String {
         context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { if (it.moveToFirst()) return it.getString(0) }
         return uri.lastPathSegment?.substringAfterLast('/') ?: "imported"
     }
+
+    private companion object {
+        private const val TAG = "Repository"
+
+        /** Files staged by [stageAsset] before validation; never shown in the asset list. */
+        const val STAGED_SUFFIX = ".importing"
+    }
+
 }

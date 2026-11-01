@@ -13,6 +13,7 @@ object Tables {
     val MULTI_FACTOR_VALUES = intArrayOf(100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 3000)
     val REVERB_ROOM_SIZE = listOf("25", "36", "49", "64", "81", "100", "121", "203", "347", "652", "1200")
     val REVERB_ROOM_WIDTH = listOf("5", "6", "7", "8", "9", "10", "11", "14", "19", "26", "36")
+    /** Legacy (settings v1) bass boost steps, kept only to migrate old bass.gain indices. */
     val BASS_BOOST_DB = listOf("3.5", "6.0", "8.0", "10.0", "11.0", "12.0", "13.0", "14.0", "14.8", "15.6", "16.3", "17.0")
     val CLARITY_BOOST_DB = listOf("0.0", "3.5", "6.0", "8.0", "10.0", "11.0", "12.0", "13.0", "14.0", "14.8")
 

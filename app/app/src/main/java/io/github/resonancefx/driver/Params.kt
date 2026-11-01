@@ -113,7 +113,8 @@ object Params {
     const val BASS_ENABLE = 65574
     const val BASS_MODE = 65575
     const val BASS_FREQUENCY = 65576
-    const val BASS_GAIN = 65577
+    const val BASS_GAIN = 65577 // dB x10, 0..170
+    const val BASS_HARMONICS = 65589 // x100, 0..50 (Pure bass+ only)
 
     // Clarity enhancer
     const val CLARITY_ENABLE = 65578

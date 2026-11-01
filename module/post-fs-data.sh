@@ -9,6 +9,14 @@ mkdir -p /data/adb/resonancefx/logs
 mv -f "$RFX_LOGFILE" "$RFX_LOGFILE.old" 2>/dev/null
 . "$MODDIR/common.sh"
 
+if rfx_in_recovery; then
+    # Recovery sessions (Magisk/APatch flashing a ROM, KernelSU recovery boots): nothing is
+    # being patched here and any bind would die with the session, but it would also be logged
+    # as a successful boot state.
+    rfx_log "post-fs-data: recovery session, skipping"
+    exit 0
+fi
+
 rfx_log "post-fs-data: root=$(rfx_root_impl) api=$(rfx_api) abis=$(getprop ro.product.cpu.abilist)"
 rm -f "$RFX_STATE/lib_mode" "$RFX_STATE/cfg_mode"
 

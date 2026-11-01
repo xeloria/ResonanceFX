@@ -42,15 +42,16 @@ float tableDb(const float* table, int size, int v, int base, int step) {
     return table[i] + (table[i + 1] - table[i]) * f;
 }
 
-// The app's bass and clarity boost steps (what its sliders show).
-constexpr float kBassBoostDb[] = {3.5f, 6.0f, 8.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 14.8f, 15.6f, 16.3f, 17.0f};
+// The app's clarity boost steps (what its slider shows). Bass gain is stepless (dB x10).
 constexpr float kClarityBoostDb[] = {0.0f, 3.5f, 6.0f, 8.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 14.8f};
 
 float linearX100ToDb(int v) { return static_cast<float>(gainToDb(std::max(v, 1) / 100.0)); }
 
 uint64_t nowMs() {
     using namespace std::chrono;
-    return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+    // steady_clock: the "is it processing" checks compare against wall time on the app side but
+    // must never regress under NTP/DST steps, which system_clock permits.
+    return static_cast<uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
 }
 
 constexpr int kConvBlock = 512;
@@ -155,6 +156,7 @@ void Engine::reset(bool full) {
                       &stField_, &stHaas_, &stCure_, &stHrtf_, &stReverb_, &stXtc_, &stSpeaker_, &stAgc_,
                       &stProtect_}) {
         st->mix = st->target ? 1.0f : 0.0f;
+        releaseAlign(*st);  // dry history never survives a stream reset
     }
     ddc_.reset();
     for (ParametricEq* eq : {&autoEq_, &userEq_, &legacyEq_, &geq_, &loud_, &clarityEq_, &vseEq_, &tubeEq_, &hrtfEq_}) eq->reset();
@@ -183,6 +185,13 @@ void Engine::reset(bool full) {
     protect_.reset();
     limiter_.reset();
     outGain_.snap(targetGain_);
+    // The compressor's programme-adaptive timing is signal state, so it restarts from the
+    // defaults instead of carrying crest tracking across a stream reset.
+    compCrestEnv_ = 0.0;
+    compPeakEnv_ = 0.0;
+    compAutoAttack_ = 20.0;
+    compAutoRelease_ = 50.0;
+    compCounter_ = 0;
 }
 
 // ---- Parameters ---------------------------------------------------------------------------------
@@ -331,7 +340,8 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
         case kBassEnable: stBass_.target = on; return 0;
         case kBassMode: bass_p_.mode = clampv(a, 0, 2); applyBass(); return 0;
         case kBassFreq: bass_p_.freq = clampv(a, 15, 300); applyBass(); return 0;
-        case kBassGain: bass_p_.gain = clampv(a, 50, 600); applyBass(); return 0;
+        case kBassGain: bass_p_.gain = clampv(a, 0, 170); applyBass(); return 0;
+        case kBassHarmonics: bass_p_.harmonics = clampv(a, 0, 50); applyBass(); return 0;
 
         case kClarityEnable: stClarity_.target = on; return 0;
         case kClarityMode: clarity_p_.mode = clampv(a, 0, 2); applyClarity(); return 0;
@@ -620,7 +630,9 @@ bool Engine::commitKernel(uint32_t bufferId, uint32_t crc, uint32_t kernelId) {
         return true;
     }
     const int length = static_cast<int>(data.size() / static_cast<size_t>(paths));
-    if (length < 16) return false;
+    // A trailing partial frame means the app and engine disagree on the path count; committing
+    // a truncated (but CRC-valid) kernel would silently change the impulse response.
+    if (data.size() % static_cast<size_t>(paths) != 0 || length < 16) return false;
 
     // Deinterleave into one buffer per path.
     std::vector<std::vector<float>> path(static_cast<size_t>(paths), std::vector<float>(static_cast<size_t>(length)));
@@ -654,8 +666,8 @@ void Engine::applyBass() {
     // carries on small drivers. Subwoofer: a lower, deeper shelf plus a sub-octave.
     s.mode = bass_p_.mode == 1 ? BassEnhancer::kHybrid : BassEnhancer::kShelf;
     s.freq = static_cast<float>(bass_p_.mode == 2 ? std::max(20, bass_p_.freq * 4 / 5) : bass_p_.freq);
-    s.gainDb = tableDb(kBassBoostDb, 12, bass_p_.gain, 50, 50) + (bass_p_.mode == 2 ? 4.0f : 0.0f);
-    s.harmonics = bass_p_.mode == 1 ? 0.25f : 0.0f;
+    s.gainDb = bass_p_.gain / 10.0f + (bass_p_.mode == 2 ? 4.0f : 0.0f);
+    s.harmonics = bass_p_.mode == 1 ? bass_p_.harmonics / 100.0f : 0.0f;
     s.protect = 0.6f;
     bass_.set(s);
     bass_p_.subwoofer = bass_p_.mode == 2;
@@ -845,22 +857,86 @@ void Engine::updateHrtfCompensation(const HrtfSpatializer::Settings& s) {
 
 // ---- Processing ------------------------------------------------------------------------------------
 
+/// Borrows a ring from the pool for a latency-bearing stage (called under the processing lock).
+void Engine::acquireAlign(Stage& st, int latency) {
+    for (Aligner& a : aligners_) {
+        if (!a.inUse) {
+            a.inUse = true;
+            a.pos = 0;
+            a.delay = latency;
+            a.fed = 0;
+            a.primed = false;
+            st.align = &a;
+            return;
+        }
+    }
+    st.align = nullptr;  // pool exhausted: fall back to the unaligned (legacy) crossfade
+}
+
+void Engine::releaseAlign(Stage& st) {
+    if (st.align == nullptr) return;
+    static_cast<Aligner*>(st.align)->inUse = false;
+    st.align = nullptr;
+    st.latencySeen = -1;
+}
+
 template <class Fn, class Reset>
-void Engine::run(Stage& st, float* l, float* r, int n, Fn&& fn, Reset&& reset) {
-    if (!st.target && st.mix <= 0.0f) return;
+void Engine::run(Stage& st, float* l, float* r, int n, int latency, Fn&& fn, Reset&& reset) {
+    if (!st.target && st.mix <= 0.0f) {
+        releaseAlign(st);
+        return;
+    }
+    if (latency != st.latencySeen) {
+        releaseAlign(st);
+        st.latencySeen = latency;
+        if (latency > 0 && latency <= Aligner::kCap) acquireAlign(st, latency);
+    }
+    Aligner* al = static_cast<Aligner*>(st.align);
+
     if (st.target && st.mix >= 1.0f) {
+        if (al) al->feed(l, r, n);  // keep the dry history current for a later fade-out
         fn(l, r, n);
         return;
     }
+
     std::memcpy(dryL_.data(), l, static_cast<size_t>(n) * sizeof(float));
     std::memcpy(dryR_.data(), r, static_cast<size_t>(n) * sizeof(float));
-    fn(l, r, n);
+
+    if (al && !al->primed && st.target) {
+        // Fade-in still buffering the dry history: keep the module running (its state stays
+        // warm) but hold the output on dry until `delay` samples of it exist to align against.
+        fn(l, r, n);
+        al->feed(dryL_.data(), dryR_.data(), n);
+        if (al->fed < al->delay) {
+            std::memcpy(l, dryL_.data(), static_cast<size_t>(n) * sizeof(float));
+            std::memcpy(r, dryR_.data(), static_cast<size_t>(n) * sizeof(float));
+            return;
+        }
+        al->primed = true;  // fall through into the aligned fade below (mix is still 0)
+    } else {
+        fn(l, r, n);
+    }
+
     const float step = st.target ? stageStep_ : -stageStep_;
     float mix = st.mix;
-    for (int i = 0; i < n; ++i) {
-        mix = clampv(mix + step, 0.0f, 1.0f);
-        l[i] = dryL_[static_cast<size_t>(i)] + (l[i] - dryL_[static_cast<size_t>(i)]) * mix;
-        r[i] = dryR_[static_cast<size_t>(i)] + (r[i] - dryR_[static_cast<size_t>(i)]) * mix;
+    if (al && al->primed) {
+        // The delayed dry leg matches the module's output timeline, so the fade splices in sync.
+        const int mask = Aligner::kCap - 1;
+        for (int i = 0; i < n; ++i) {
+            const float dl = al->laneL[al->pos], dr = al->laneR[al->pos];
+            al->laneL[al->pos] = dryL_[static_cast<size_t>(i)];
+            al->laneR[al->pos] = dryR_[static_cast<size_t>(i)];
+            al->pos = (al->pos + 1) & mask;
+            mix = clampv(mix + step, 0.0f, 1.0f);
+            l[i] = dl + (l[i] - dl) * mix;
+            r[i] = dr + (r[i] - dr) * mix;
+        }
+    } else {
+        for (int i = 0; i < n; ++i) {
+            mix = clampv(mix + step, 0.0f, 1.0f);
+            l[i] = dryL_[static_cast<size_t>(i)] + (l[i] - dryL_[static_cast<size_t>(i)]) * mix;
+            r[i] = dryR_[static_cast<size_t>(i)] + (r[i] - dryR_[static_cast<size_t>(i)]) * mix;
+        }
     }
     st.mix = mix;
     if (!st.target && st.mix <= 0.0f) reset();  // start clean next time it is enabled
@@ -914,9 +990,9 @@ void Engine::processBlock(float* l, float* r, int n) {
 }
 
 void Engine::processModules(float* l, float* r, int n) {
-    run(stDdc_, l, r, n, [&](float* a, float* b, int m) { ddc_.process(a, b, m); }, [&] { ddc_.reset(); });
-    run(stAutoEq_, l, r, n, [&](float* a, float* b, int m) { autoEq_.process(a, b, m); }, [&] { autoEq_.reset(); });
-    run(stConv_, l, r, n,
+    run(stDdc_, l, r, n, 0, [&](float* a, float* b, int m) { ddc_.process(a, b, m); }, [&] { ddc_.reset(); });
+    run(stAutoEq_, l, r, n, 0, [&](float* a, float* b, int m) { autoEq_.process(a, b, m); }, [&] { autoEq_.reset(); });
+    run(stConv_, l, r, n, conv_.latency(),
         [&](float* a, float* b, int m) {
             conv_.process(a, b, m);
             if (crossChannel_ > 0) {
@@ -929,40 +1005,40 @@ void Engine::processModules(float* l, float* r, int n) {
             }
         },
         [&] { conv_.reset(); });
-    run(stUserEq_, l, r, n, [&](float* a, float* b, int m) { userEq_.process(a, b, m); }, [&] { userEq_.reset(); });
-    run(stLegacyEq_, l, r, n, [&](float* a, float* b, int m) { legacyEq_.process(a, b, m); }, [&] { legacyEq_.reset(); });
-    run(stGeq_, l, r, n, [&](float* a, float* b, int m) { geq_.process(a, b, m); }, [&] { geq_.reset(); });
-    run(stLoud_, l, r, n, [&](float* a, float* b, int m) { loud_.process(a, b, m); }, [&] { loud_.reset(); });
-    run(stDeq_, l, r, n, [&](float* a, float* b, int m) { deq_.process(a, b, m); }, [&] { deq_.reset(); });
-    run(stDeess_, l, r, n, [&](float* a, float* b, int m) { deess_.process(a, b, m); }, [&] { deess_.reset(); });
-    run(stVocal_, l, r, n, [&](float* a, float* b, int m) { vocal_.process(a, b, m); }, [&] { vocal_.reset(); });
-    run(stVse_, l, r, n,
+    run(stUserEq_, l, r, n, 0, [&](float* a, float* b, int m) { userEq_.process(a, b, m); }, [&] { userEq_.reset(); });
+    run(stLegacyEq_, l, r, n, 0, [&](float* a, float* b, int m) { legacyEq_.process(a, b, m); }, [&] { legacyEq_.reset(); });
+    run(stGeq_, l, r, n, 0, [&](float* a, float* b, int m) { geq_.process(a, b, m); }, [&] { geq_.reset(); });
+    run(stLoud_, l, r, n, 0, [&](float* a, float* b, int m) { loud_.process(a, b, m); }, [&] { loud_.reset(); });
+    run(stDeq_, l, r, n, 0, [&](float* a, float* b, int m) { deq_.process(a, b, m); }, [&] { deq_.reset(); });
+    run(stDeess_, l, r, n, 0, [&](float* a, float* b, int m) { deess_.process(a, b, m); }, [&] { deess_.reset(); });
+    run(stVocal_, l, r, n, vocal_.latency(), [&](float* a, float* b, int m) { vocal_.process(a, b, m); }, [&] { vocal_.reset(); });
+    run(stVse_, l, r, n, vse_.latency(),
         [&](float* a, float* b, int m) {
             vse_.process(a, b, m);
             vseEq_.process(a, b, m);
         },
         [&] { vse_.reset(); vseEq_.reset(); });
-    run(stBass_, l, r, n,
+    run(stBass_, l, r, n, 0,
         [&](float* a, float* b, int m) {
             bass_.process(a, b, m);
             if (bass_p_.subwoofer) sub_.process(a, b, m);
         },
         [&] { bass_.reset(); sub_.reset(); });
-    run(stDyn_, l, r, n, [&](float* a, float* b, int m) { dyn_.process(a, b, m); }, [&] { dyn_.reset(); });
-    run(stClarity_, l, r, n,
+    run(stDyn_, l, r, n, 0, [&](float* a, float* b, int m) { dyn_.process(a, b, m); }, [&] { dyn_.reset(); });
+    run(stClarity_, l, r, n, clarity_.latency(),
         [&](float* a, float* b, int m) {
             clarityEq_.process(a, b, m);
             clarity_.process(a, b, m);
         },
         [&] { clarity_.reset(); clarityEq_.reset(); });
-    run(stTube_, l, r, n,
+    run(stTube_, l, r, n, tube_.latency(),
         [&](float* a, float* b, int m) {
             tube_.process(a, b, m);
             tubeEq_.process(a, b, m);
         },
         [&] { tube_.reset(); tubeEq_.reset(); });
-    run(stAnalog_, l, r, n, [&](float* a, float* b, int m) { analog_.process(a, b, m); }, [&] { analog_.reset(); });
-    run(stComp_, l, r, n,
+    run(stAnalog_, l, r, n, 0, [&](float* a, float* b, int m) { analog_.process(a, b, m); }, [&] { analog_.reset(); });
+    run(stComp_, l, r, n, comp_p_.noClip ? compClip_.latency() : 0,
         [&](float* a, float* b, int m) {
             if (comp_p_.autoAttack || comp_p_.autoRelease) {
                 // Programme-dependent timing from the crest factor: transient material (high
@@ -989,20 +1065,20 @@ void Engine::processModules(float* l, float* r, int n) {
             if (comp_p_.noClip) compClip_.process(a, b, m);
         },
         [&] { comp_.reset(); compClip_.reset(); });
-    run(stMbc_, l, r, n, [&](float* a, float* b, int m) { mbc_.process(a, b, m); }, [&] { mbc_.reset(); });
-    run(stField_, l, r, n, [&](float* a, float* b, int m) { field_.process(a, b, m); }, [&] { field_.reset(); });
-    run(stHaas_, l, r, n, [&](float* a, float* b, int m) { haas_.process(a, b, m); }, [&] { haas_.reset(); });
-    run(stCure_, l, r, n, [&](float* a, float* b, int m) { cure_.process(a, b, m); }, [&] { cure_.reset(); });
-    run(stHrtf_, l, r, n,
+    run(stMbc_, l, r, n, 0, [&](float* a, float* b, int m) { mbc_.process(a, b, m); }, [&] { mbc_.reset(); });
+    run(stField_, l, r, n, 0, [&](float* a, float* b, int m) { field_.process(a, b, m); }, [&] { field_.reset(); });
+    run(stHaas_, l, r, n, 0, [&](float* a, float* b, int m) { haas_.process(a, b, m); }, [&] { haas_.reset(); });
+    run(stCure_, l, r, n, 0, [&](float* a, float* b, int m) { cure_.process(a, b, m); }, [&] { cure_.reset(); });
+    run(stHrtf_, l, r, n, 0,
         [&](float* a, float* b, int m) {
             hrtf_.process(a, b, m);
             hrtfEq_.process(a, b, m);
         },
         [&] { hrtf_.reset(); hrtfEq_.reset(); });
-    run(stReverb_, l, r, n, [&](float* a, float* b, int m) { reverb_.process(a, b, m); }, [&] { reverb_.reset(); });
-    run(stXtc_, l, r, n, [&](float* a, float* b, int m) { xtc_.process(a, b, m); }, [&] { xtc_.reset(); });
-    run(stSpeaker_, l, r, n, [&](float* a, float* b, int m) { speaker_.process(a, b, m); }, [&] { speaker_.reset(); });
-    run(stAgc_, l, r, n, [&](float* a, float* b, int m) { agc_.process(a, b, m); }, [&] { agc_.reset(); });
+    run(stReverb_, l, r, n, 0, [&](float* a, float* b, int m) { reverb_.process(a, b, m); }, [&] { reverb_.reset(); });
+    run(stXtc_, l, r, n, 0, [&](float* a, float* b, int m) { xtc_.process(a, b, m); }, [&] { xtc_.reset(); });
+    run(stSpeaker_, l, r, n, 0, [&](float* a, float* b, int m) { speaker_.process(a, b, m); }, [&] { speaker_.reset(); });
+    run(stAgc_, l, r, n, 0, [&](float* a, float* b, int m) { agc_.process(a, b, m); }, [&] { agc_.reset(); });
 }
 
 void Engine::master(float* l, float* r, int n) {
@@ -1018,7 +1094,7 @@ void Engine::master(float* l, float* r, int n) {
         r[i] *= g * panR_.next();
     }
     // Protection sees the final level, after every boost and the output gain.
-    run(stProtect_, l, r, n, [&](float* a, float* b, int m) { protect_.process(a, b, m); }, [&] { protect_.reset(); });
+    run(stProtect_, l, r, n, 0, [&](float* a, float* b, int m) { protect_.process(a, b, m); }, [&] { protect_.reset(); });
     limiter_.process(l, r, n);
 }
 

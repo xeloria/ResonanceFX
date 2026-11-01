@@ -401,7 +401,8 @@ object Catalog {
             listOf(
                 Choice("bass.mode", "Mode", listOf("Natural", "Pure bass+", "Subwoofer"), 0) { fx, v -> fx.set(Params.BASS_MODE, v) },
                 Slider("bass.freq", "Frequency", 0..135, 55, { "${it + 15} Hz" }) { fx, v -> fx.set(Params.BASS_FREQUENCY, v + 15) },
-                Slider("bass.gain", "Gain", 0..11, 0, { "${Tables.BASS_BOOST_DB[it]} dB" }) { fx, v -> fx.set(Params.BASS_GAIN, v * 50 + 50) },
+                Slider("bass.gain", "Gain", 0..170, 35, { "%.1f dB".format(it / 10f) }) { fx, v -> fx.set(Params.BASS_GAIN, v) },
+                Slider("bass.harmonics", "Harmonics (Pure bass+)", 0..50, 25, { "%.2f".format(it / 100f) }) { fx, v -> fx.set(Params.BASS_HARMONICS, v) },
             ),
         ),
         Section(

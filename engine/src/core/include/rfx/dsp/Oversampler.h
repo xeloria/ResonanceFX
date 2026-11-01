@@ -2,8 +2,10 @@
 // Copyright (C) 2026 Xeloria
 
 #pragma once
-// 2x polyphase half-band FIR oversampler for nonlinear stages (anti-aliasing).
-// 63-tap Kaiser-windowed half-band; up + down latency = 31 base-rate samples.
+// 2x polyphase FIR oversampler for nonlinear stages (anti-aliasing).
+// 63-tap Kaiser-windowed half-band; both phases run the same anti-impulse FIR (the odd phase on
+// a one-sample-later history) so nonlinear stages never see an under-filtered phase.
+// Up + down latency = 31 base-rate samples.
 
 #include <cmath>
 
@@ -43,10 +45,15 @@ public:
         upHist_[upPos_] = x;
         upHist_[upPos_ + kEven] = x;
         const double* hp = upHist_ + upPos_;  // hp[k] = x[m-k]
-        double acc = 0.0;
+        double acc = 0.0, acc2 = 0.0;
         for (int j = 0; j < kEven; ++j) acc += h_[j] * hp[j];
         y0 = static_cast<float>(2.0 * acc);
-        y1 = static_cast<float>(hp[15]);  // centre tap: x[m-15]
+        // Odd phase: the same polyphase FIR over x[m-1-k]. A pure sample value here (a
+        // zero-order hold) reaches the nonlinear stage with the image band barely attenuated;
+        // filtering this phase identically keeps the odd stream equally clean. DC gain stays
+        // at 2 * sum(h_) = 1 for both phases, so the down() pairing remains balanced.
+        for (int j = 0; j < kEven; ++j) acc2 += h_[j] * hp[j + 1];
+        y1 = static_cast<float>(2.0 * acc2);
     }
 
     /// Two oversampled samples in (x0 first in time), one base-rate sample out.
@@ -57,7 +64,8 @@ public:
         const double* ep = evenHist_ + evenPos_;  // ep[j] = E[m-j]
         double acc = 0.0;
         for (int j = 0; j < kEven; ++j) acc += h_[j] * ep[j];
-        // Odd branch: centre tap 0.5 * O[m-16].
+        // Odd branch pairing: matches the odd phase produced by up(), so both streams carry the
+        // same (now filtered) level at DC.
         oddPos_ = (oddPos_ == 0) ? kOddDelay - 1 : oddPos_ - 1;
         oddHist_[oddPos_] = x1;
         oddHist_[oddPos_ + kOddDelay] = x1;

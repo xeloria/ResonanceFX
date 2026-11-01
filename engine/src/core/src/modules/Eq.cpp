@@ -26,23 +26,6 @@ EqBand sanitize(EqBand b, double fs) {
 }
 }  // namespace
 
-int decodeBands(const float* v, int count, EqBand* out, int maxBands) {
-    const int n = std::min(count / 6, maxBands);
-    for (int i = 0; i < n; ++i) {
-        const float* p = v + i * 6;
-        EqBand b;
-        b.enabled = p[0] >= 0.5f;
-        b.type = static_cast<FilterType>(clampv(static_cast<int>(std::lround(p[1])), 0,
-                                                static_cast<int>(FilterType::Count) - 1));
-        b.freq = p[2];
-        b.gainDb = p[3];
-        b.q = p[4];
-        b.channel = clampv(static_cast<int>(std::lround(p[5])), 0, 4);
-        out[i] = b;
-    }
-    return n;
-}
-
 ParametricEq::ParametricEq(int capacity) : slots_(static_cast<size_t>(capacity)) {
     prepare(48000.0);
 }

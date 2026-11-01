@@ -27,6 +27,7 @@ import io.github.resonancefx.R
 import io.github.resonancefx.autoeq.AutoEqDatabase
 import io.github.resonancefx.data.Route
 import io.github.resonancefx.driver.DriverStatus
+import io.github.resonancefx.driver.DriverStatusHub
 import io.github.resonancefx.driver.Params
 import io.github.resonancefx.engine.Applier
 import io.github.resonancefx.engine.SessionManager
@@ -129,6 +130,8 @@ class EngineService : LifecycleService() {
             // Load the profile first so the very first attach already applies the real settings.
             sessions.update(repository.settings.value)
             sessions.setMode(repository.attachMode)
+            // Give the UI an immediate snapshot; afterwards the watchdog tick publishes.
+            runCatching { DriverStatusHub.refresh() }
         }
         lifecycleScope.launch {
             repository.settings.collect { settings ->
@@ -141,14 +144,44 @@ class EngineService : LifecycleService() {
                 .collect { updateNotification() }
         }
         // Watchdog: re-attach after audioserver restarts and re-upload the impulse response when
-        // the output sample rate changes (e.g. switching to a 96 kHz USB DAC).
+        // the output sample rate changes (e.g. switching to a 96 kHz USB DAC). The first tick
+        // settles which rate the framework actually configured, so any kernel uploaded before
+        // that (or skipped while the rate was still unknown) gets re-applied with the true rate.
+        // The tick also publishes the status snapshot the Status/Effects screens display — theirs
+        // used to be their own poll loops, whose getter bursts on a suspended/offloaded sound
+        // output (e.g. idle Bluetooth, master off) audibly interrupted the music.
+        // Adaptive cadence: 3 s while audio can be flowing (an instance enabled, retrying an
+        // attach, or a handle just replaced); 10 s when every instance is idle (master off,
+        // nothing playing) — the probe commands behind it take the effect chain's lock, and on
+        // suspended/offloaded Bluetooth output that is audible as a short stutter. Backing off
+        // needs two consecutive idle probes: some stacks (Samsung's effect stages seen on One
+        // UI) pulse the enabled state around audio transitions, and a single-tick decision
+        // would flip the cadence back and forth.
+        var slowCadence = false
+        var idleTicks = 0
         lifecycleScope.launch(engineThread) {
+            var intervalMs = 3000L
             while (isActive) {
-                delay(3000)
-                val rate = sessions.primary?.getInt(Params.GET_SAMPLING_RATE) ?: 0
-                if (rate > 0 && lastSampleRate != 0 && rate != lastSampleRate) sessions.reapply()
-                if (rate > 0) lastSampleRate = rate
-                sessions.watchdog()
+                delay(intervalMs)
+                val keepFast = sessions.watchdog()
+                if (keepFast) {
+                    idleTicks = 0
+                    val rate = sessions.primary?.getInt(Params.GET_SAMPLING_RATE) ?: 0
+                    if (rate > 0 && rate != lastSampleRate) sessions.reapply()
+                    if (rate > 0) lastSampleRate = rate
+                } else {
+                    idleTicks++
+                }
+                val slow = idleTicks >= 2
+                intervalMs = if (slow) 10000L else 3000L
+                if (slow != slowCadence) {
+                    slowCadence = slow
+                    android.util.Log.i(
+                        "ResonanceFX.Service",
+                        if (slow) "watchdog cadence -> 10 s (idle)" else "watchdog cadence -> 3 s",
+                    )
+                }
+                runCatching { DriverStatusHub.refresh() }
             }
         }
     }

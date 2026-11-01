@@ -26,9 +26,6 @@ struct EqBand {
     }
 };
 
-/// Decodes the protocol encoding (enabled, type, freq, gain, q, channel) * n.
-int decodeBands(const float* values, int count, EqBand* out, int maxBands);
-
 class ParametricEq {
 public:
     explicit ParametricEq(int capacity = 32);

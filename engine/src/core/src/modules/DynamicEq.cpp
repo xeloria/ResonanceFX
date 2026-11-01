@@ -25,26 +25,6 @@ inline double softOver(double over) {
 }
 }  // namespace
 
-int decodeDynamicBands(const float* v, int count, DynamicBand* out, int maxBands) {
-    const int n = std::min(count / 10, maxBands);
-    for (int i = 0; i < n; ++i) {
-        const float* p = v + i * 10;
-        DynamicBand b;
-        b.enabled = p[0] >= 0.5f;
-        b.type = clampv(static_cast<int>(std::lround(p[1])), 0, 2);
-        b.freq = std::isfinite(p[2]) ? p[2] : 1000.0f;
-        b.q = clampv(std::isfinite(p[3]) ? p[3] : 1.0f, 0.1f, 20.0f);
-        b.thresholdDb = clampv(p[4], -80.0f, 0.0f);
-        b.rangeDb = clampv(p[5], -24.0f, 24.0f);
-        b.ratio = clampv(p[6], 1.0f, 50.0f);
-        b.attackMs = clampv(p[7], 0.1f, 500.0f);
-        b.releaseMs = clampv(p[8], 5.0f, 5000.0f);
-        b.mode = p[9] >= 0.5f ? 1 : 0;
-        out[i] = b;
-    }
-    return n;
-}
-
 void DynamicEq::prepare(double fs) {
     fs_ = fs;
     for (int i = 0; i < count_; ++i) configure(slots_[i]);
