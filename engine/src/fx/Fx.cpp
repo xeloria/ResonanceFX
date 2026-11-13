@@ -139,55 +139,156 @@ void HaasDelay::prepare(double sampleRate) {
     fs_ = sampleRate;
     buf_.assign(static_cast<size_t>(std::ceil(0.021 * fs_)) + 1, 0.0f);
     pos_ = 0;
-    setDelayMs(static_cast<float>(delay_ * 1000.0 / fs_));
+    
+    setHighpassHz(hpHz_); 
+    
+    lfoInc_ = 0.1 / fs_;
+    lfoPhase_ = 0.0;
+    envCoef_ = 1.0f - std::exp(-64.0f / (0.3f * fs_));
+    
+    // Apply target delay directly based on the new sample rate to prevent reset state loss
+    delay_ = std::min(static_cast<int>(std::lround(targetDelayMs_ * fs_ / 1000.0)), static_cast<int>(buf_.size()) - 1);
+    pendingDelayMs_ = -1.0f;
+    dipRemaining_ = 0;
+    dipTotal_ = 0;
 }
 
 void HaasDelay::reset() {
     std::fill(buf_.begin(), buf_.end(), 0.0f);
     pos_ = 0;
+    hpState_.reset();
+    lfoPhase_ = 0.0;
+    midEnv_ = 0.0f;
+    sideEnv_ = 0.0f;
+    envCounter_ = 0;
+    isMonoActive_ = false;
+    monoFactor_ = 1.0f;
+    
+    // Re-align delay and clear transition states to avoid lingering effects after reset
+    delay_ = std::min(static_cast<int>(std::lround(targetDelayMs_ * fs_ / 1000.0)), static_cast<int>(buf_.size()) - 1);
+    dipRemaining_ = 0;
+    dipTotal_ = 0;
+    pendingDelayMs_ = -1.0f;
+    
+    widthCurrent_ = width_;
+    widthRampRemaining_ = 0;
+    widthStep_ = 0.0f;
 }
 
 void HaasDelay::setDelayMs(float ms) {
-    const int want = std::min(static_cast<int>(std::lround(clampv(ms, 0.0f, 20.0f) * fs_ / 1000.0)),
+    targetDelayMs_ = clampv(ms, 0.0f, 20.0f);
+    
+    const int want = std::min(static_cast<int>(std::lround(targetDelayMs_ * fs_ / 1000.0)),
                               static_cast<int>(buf_.size()) - 1);
     if (want == delay_) {
         pendingDelayMs_ = -1.0f;
         return;
     }
     if (dipRemaining_ > 0) {
-        pendingDelayMs_ = ms;  // a drag re-arms the pending value instead of re-dipping
+        // A drag re-arms the pending value instead of re-dipping.
+        // Use the validated targetDelayMs_ to prevent out-of-bounds state pollution.
+        pendingDelayMs_ = targetDelayMs_;
         return;
     }
-    pendingDelayMs_ = ms;
+    pendingDelayMs_ = targetDelayMs_;
     dipTotal_ = dipRemaining_ = std::max(64, static_cast<int>(0.006 * fs_));
 }
 
+void HaasDelay::setWidth(float width) {
+    width_ = clampv(width, 0.0f, 2.0f);
+    if (std::fabs(width_ - widthCurrent_) < 1e-4f) {
+        widthCurrent_ = width_;
+        widthRampRemaining_ = 0;
+        widthStep_ = 0.0f;
+    } else {
+        widthRampRemaining_ = std::max(1, static_cast<int>(std::lround(0.020 * fs_)));
+        widthStep_ = (width_ - widthCurrent_) / static_cast<float>(widthRampRemaining_);
+    }
+}
+
+void HaasDelay::setHighpassHz(float hz) {
+    hpHz_ = clampv(hz, 80.0f, 250.0f);
+    hpCoeffs_ = designRbj(FilterType::HighPass, hpHz_, 0.0, 0.7071, fs_);
+}
+
+void HaasDelay::setMonoProtection(bool enabled) {
+    monoProtectEnabled_ = enabled;
+}
+
 void HaasDelay::process(float* left, float* right, int n) {
-    (void) left;
-    if (buf_.empty()) return;
     if (delay_ <= 0 && dipRemaining_ <= 0 && pendingDelayMs_ < 0.0f) return;
+    if (buf_.empty()) return;
+    
     const int size = static_cast<int>(buf_.size());
+    const double lfoDepthSamples = 0.05 * fs_ / 1000.0;
+    
     for (int i = 0; i < n; ++i) {
-        float y = right[i];
-        buf_[pos_] = y;
-        int read = pos_ - delay_;
-        if (read < 0) read += size;
-        y = buf_[read];
+        float mid = (left[i] + right[i]) * 0.5f;
+        float side = (left[i] - right[i]) * 0.5f;
+        
+        side = static_cast<float>(biquadTick(hpCoeffs_, hpState_, side));
+
+        if (monoProtectEnabled_) {
+            if (++envCounter_ >= 64) {
+                envCounter_ = 0;
+                midEnv_ += envCoef_ * (mid * mid - midEnv_);
+                sideEnv_ += envCoef_ * (side * side - sideEnv_);
+                float ratio = sideEnv_ / (midEnv_ + sideEnv_ + 1e-9f);
+                if (isMonoActive_ && ratio > 0.08f) isMonoActive_ = false;
+                else if (!isMonoActive_ && ratio < 0.02f) isMonoActive_ = true;
+            }
+            monoFactor_ += 0.001f * ((isMonoActive_ ? 0.0f : 1.0f) - monoFactor_);
+        } else {
+            monoFactor_ = 1.0f;
+        }
+
+        buf_[pos_] = side;
+        double lfoOffset = lfoDepthSamples * std::sin(lfoPhase_);
+        lfoPhase_ += lfoInc_;
+        if (lfoPhase_ >= kTwoPi) lfoPhase_ -= kTwoPi;
+
+        double readPos = pos_ - delay_ - lfoOffset;
+        readPos = std::fmod(readPos, (double)size);
+        if (readPos < 0.0) readPos += size;
+        
+        int i1 = static_cast<int>(readPos);
+        double frac = readPos - i1;
+        int i0 = (i1 - 1 + size) % size;
+        int i2 = (i1 + 1) % size;
+        int i3 = (i1 + 2) % size;
+        
+        float y0 = buf_[i0], y1 = buf_[i1], y2 = buf_[i2], y3 = buf_[i3];
+        double c0 = y1;
+        double c1 = 0.5 * (y2 - y0);
+        double c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+        double c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+        float delayedSide = static_cast<float>(c0 + frac * (c1 + frac * (c2 + frac * c3)));
+
         if (++pos_ == size) pos_ = 0;
+
         if (dipRemaining_ > 0) {
             // 6 ms dip: 1 -> 0 over the first quarter, silent while the delay switches, 0 -> 1.
             const float u = 1.0f - static_cast<float>(dipRemaining_) / static_cast<float>(dipTotal_);
             if (u >= 0.25f && pendingDelayMs_ >= 0.0f) {
-                const int want = static_cast<int>(std::lround(clampv(pendingDelayMs_, 0.0f, 20.0f) * fs_ / 1000.0));
-                delay_ = std::min(want, size - 1);
+                delay_ = std::min(static_cast<int>(std::lround(clampv(pendingDelayMs_, 0.0f, 20.0f) * fs_ / 1000.0)), size - 1);
                 pendingDelayMs_ = -1.0f;
             }
-            y *= u < 0.25f ? 1.0f - 4.0f * u : (u > 0.75f ? 4.0f * u - 3.0f : 0.0f);
+            delayedSide *= u < 0.25f ? 1.0f - 4.0f * u : (u > 0.75f ? 4.0f * u - 3.0f : 0.0f);
             if (--dipRemaining_ == 0) dipTotal_ = 0;
         } else if (pendingDelayMs_ >= 0.0f) {
             setDelayMs(pendingDelayMs_);
         }
-        right[i] = y;
+
+        if (widthRampRemaining_ > 0) {
+            widthCurrent_ += widthStep_;
+            --widthRampRemaining_;
+        } else {
+            widthCurrent_ = width_;
+        }
+
+        float finalSide = (side * (1.0f - monoFactor_) + delayedSide * monoFactor_) * widthCurrent_;
+        left[i] = mid + finalSide;
+        right[i] = mid - finalSide;
     }
 }
 
