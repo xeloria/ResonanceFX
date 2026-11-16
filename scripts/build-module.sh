@@ -19,7 +19,10 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do
     lib="$ROOT/out/engine/$abi/libresonancefx.so"
     [ -f "$lib" ] || { echo "missing $lib - run scripts/build-engine.sh" >&2; exit 1; }
     mkdir -p "$STAGE/engine/$abi"
-    cp "$lib" "$STAGE/engine/$abi/"
+    # The legacy AELI build plus any AIDL front-end builds (optionally platform-versioned).
+    for f in "$ROOT/out/engine/$abi"/libresonancefx*.so; do
+        [ -f "$f" ] && cp "$f" "$STAGE/engine/$abi/"
+    done
 done
 
 # Android shells choke on CRLF; make sure nothing slipped in from a Windows checkout.

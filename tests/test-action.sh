@@ -27,12 +27,21 @@ run_case() { # fail_calls missing lib_ok
     printf 'cfg|staged\n' > "$SANDBOX/state/configs"
     cat > "$SANDBOX/mod/common.sh" <<EOF
 RFX_LIB=libresonancefx.so
+RFX_LIB_AIDL=libresonancefx_aidl.so
 RFX_STATE="$SANDBOX/state"
 RFX_LOGDIR="$SANDBOX"
 RFX_UUID=00000000-0000-0000-0000-000000000000
 rfx_log() { :; }
 rfx_api() { echo 35; }
 rfx_root_impl() { echo kernelsu; }
+rfx_factory_mode() { echo legacy; }
+rfx_record_factory_mode() { :; }
+rfx_primary_abi() { echo arm64-v8a; }
+rfx_aidl_lib() { :; }
+rfx_effect_pids() { echo "\$\$"; }
+rfx_active_lib() { echo "\$RFX_LIB"; }
+rfx_factory_sees() { [ -f "\$1" ]; }
+rfx_factory_matches() { cmp -s "\$1" "\$2"; }
 rfx_lib_targets() { echo "lib64 arm64-v8a"; }
 rfx_lib_partitions() { echo /vendor; }
 rfx_generate_configs() { :; }
@@ -59,10 +68,14 @@ check "delayed registration succeeds" "Result: ✅" "NOT registered"
 
 # Never registers, nothing missing: must say so, not blame missing configs.
 run_case 99 0 1
-check "unregistered HAL reported honestly" "Result: ⚠️" "still missing"
+check "unregistered HAL reported honestly" "Result: ⚠️" "cannot see"
 
-# Configs genuinely missing: the failure keeps its real reason.
+# Configs genuinely not visible to the audio HAL: the failure keeps its real reason.
 run_case 99 2 1
-check "missing configs reported" "Result: ❌ 2 config(s) still missing" "⚠️"
+check "configs not visible reported" "Result: ❌ 2 config(s) not visible" "⚠️"
+
+# Library exists in the shell but not in the effect process's view: name that, not the configs.
+run_case 99 0 0
+check "hidden library reported" "the audio HAL cannot see" "not visible to the audio HAL. Full"
 
 exit $fail

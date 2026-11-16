@@ -135,7 +135,7 @@ static void testStereoFloatProcessing() {
     fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
     fx.simple(EFFECT_CMD_ENABLE);
     fx.set(PARAM_FIDELITY_BASS_ENABLE, {1});
-    fx.set(PARAM_FIDELITY_BASS_GAIN, {600});
+    fx.set(PARAM_FIDELITY_BASS_GAIN, {170});
     fx.set(PARAM_FIDELITY_CLARITY_ENABLE, {1});
     fx.set(PARAM_GATE_OUTPUT_VOLUME, {200});
     auto in = sine(256, 2, 0.95f, 80);
@@ -159,7 +159,7 @@ static void testClampingInt16() {
     fx.set(PARAM_GATE_OUTPUT_VOLUME, {200});
     fx.set(PARAM_GATE_LIMIT, {100});
     fx.set(PARAM_FIDELITY_BASS_ENABLE, {1});
-    fx.set(PARAM_FIDELITY_BASS_GAIN, {600});
+    fx.set(PARAM_FIDELITY_BASS_GAIN, {170});
     int wraps = 0, clipped = 0;
     int16_t last[2] = {0, 0};
     for (int block = 0; block < 200; block++) {
@@ -618,6 +618,58 @@ static void startAgc(Fx &fx) {
     fx.set(kAgcEnable, {1});
 }
 
+static void testBassStepless() {
+    // Stepless gain (dB x10): 0 is truly flat, small values give small lifts, max is full boost.
+    Fx fx;
+    fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+    fx.simple(EFFECT_CMD_ENABLE);
+    fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+    fx.set(PARAM_GATE_LIMIT, {100});
+    fx.set(PARAM_FIDELITY_BASS_ENABLE, {1});
+    fx.set(kBassMode, {0});
+    fx.set(kBassFreq, {70});
+    fx.set(kBassGain, {0});
+    const double flat = measureGainDbAt(fx, 40, 48000, 0.05f, false);
+    CHECK(fabs(flat) < 0.4, "bass gain 0 lift %.2f dB, expected flat", flat);
+    fx.set(kBassGain, {6});  // 0.6 dB: the fine control phone speakers need
+    const double small = measureGainDbAt(fx, 40, 48000, 0.05f, false) - flat;
+    CHECK(small > 0.25 && small < 0.95, "bass gain 0.6 dB lift %.2f dB", small);
+    fx.set(kBassGain, {170});
+    const double full = measureGainDbAt(fx, 40, 48000, 0.05f, false) - flat;
+    CHECK(full > 12.0, "bass gain 17 dB lift %.2f dB", full);
+    fx.set(kBassGain, {999});  // clamps to 170
+    const double clamped = measureGainDbAt(fx, 40, 48000, 0.05f, false) - flat;
+    CHECK(fabs(clamped - full) < 0.5, "bass gain clamps at max: %.2f vs %.2f dB", clamped, full);
+
+    // Harmonics (Pure bass+): more harmonic energy with the slider up, at zero shelf gain.
+    auto harmonicRms = [](int harmonics) {
+        Fx f2;
+        f2.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        f2.simple(EFFECT_CMD_ENABLE);
+        f2.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+        f2.set(PARAM_GATE_LIMIT, {100});
+        f2.set(PARAM_FIDELITY_BASS_ENABLE, {1});
+        f2.set(kBassMode, {1});
+        f2.set(kBassFreq, {70});
+        f2.set(kBassGain, {0});
+        f2.set(kBassHarmonics, {harmonics});
+        std::vector<float> in(512), out(512);
+        double sum = 0.0; int n = 0;
+        for (int block = 0; block < 200; block++) {
+            for (int i = 0; i < 256; i++) {
+                const float s = 0.5f * sinf(2 * M_PI * 50 * (block * 256 + i) / 48000.0f);
+                in[i * 2] = in[i * 2 + 1] = s;
+            }
+            audio_buffer_t ib{256, {in.data()}}, ob{256, {out.data()}};
+            f2.process(&ib, &ob);
+            if (block >= 150) { for (float s : out) { sum += s * s; n++; } }
+        }
+        return sqrt(sum / n);
+    };
+    const double rmsOff = harmonicRms(0), rmsOn = harmonicRms(50);
+    CHECK(rmsOn > rmsOff * 1.05, "harmonics 0.50 RMS %.4f vs 0.00 RMS %.4f, expected audible harmonics", rmsOn, rmsOff);
+}
+
 static void testPlaybackGain() {
     {
         // A quiet track (-31 LUFS) is lifted to the +12 dB limit within half a second.
@@ -838,6 +890,7 @@ int main() {
     testHeadphoneSurround();
     testParametricEq();
     testSpeakerModules();
+    testBassStepless();
     testPlaybackGain();
     testListeningTest();
     testConcurrentCommands();

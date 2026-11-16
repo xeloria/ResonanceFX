@@ -355,13 +355,13 @@ int main() {
     }, kCrossfeed);
 
     report("bass", "Bass enhancer (natural)", "natural, 70 Hz, 13 dB", [](Fx& f) {
-        f.set(kBassMode, {0}); f.set(kBassFreq, {70}); f.set(kBassGain, {350}); f.set(kBassEnable, {1});
+        f.set(kBassMode, {0}); f.set(kBassFreq, {70}); f.set(kBassGain, {130}); f.set(kBassEnable, {1});
     });
     report("bass", "Bass enhancer (pure bass+)", "pure bass+, 70 Hz, 13 dB", [](Fx& f) {
-        f.set(kBassMode, {1}); f.set(kBassFreq, {70}); f.set(kBassGain, {350}); f.set(kBassEnable, {1});
+        f.set(kBassMode, {1}); f.set(kBassFreq, {70}); f.set(kBassGain, {130}); f.set(kBassEnable, {1});
     });
     report("bass", "Bass enhancer (subwoofer)", "subwoofer, 70 Hz, 13 dB", [](Fx& f) {
-        f.set(kBassMode, {2}); f.set(kBassFreq, {70}); f.set(kBassGain, {350}); f.set(kBassEnable, {1});
+        f.set(kBassMode, {2}); f.set(kBassFreq, {70}); f.set(kBassGain, {130}); f.set(kBassEnable, {1});
     });
     report("clarity", "Clarity enhancer (natural)", "natural, 10 dB", [](Fx& f) {
         f.set(kClarityMode, {0}); f.set(kClarityGain, {250}); f.set(kClarityEnable, {1});

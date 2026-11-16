@@ -12,8 +12,8 @@ SDK="${ANDROID_SDK:-${ANDROID_HOME:-${LOCALAPPDATA:-$HOME}/Android/Sdk}}"
 NDK_VERSION="${NDK_VERSION:-$(ls "$SDK/ndk" | sort -V | tail -1)}"
 NDK="$SDK/ndk/$NDK_VERSION"
 CMAKE_DIR="$(ls -d "$SDK"/cmake/* | sort -V | tail -1)/bin"
-VERSION_CODE="${VERSION_CODE:-20201}"
-VERSION_NAME="${VERSION_NAME:-2.2.1}"
+VERSION_CODE="${VERSION_CODE:-20202}"
+VERSION_NAME="${VERSION_NAME:-2.2.2}"
 
 # minSdk 21 (Android 5.0) for every ABI: the oldest release the module supports.
 ABIS=(arm64-v8a armeabi-v7a x86_64 x86)
@@ -33,6 +33,8 @@ for ABI in "${ABIS[@]}"; do
         -DRFX_VERSION_CODE="$VERSION_CODE" \
         -DRFX_VERSION_NAME="$VERSION_NAME" >/dev/null
     "$CMAKE_DIR/cmake" --build "$BUILD" >/dev/null
-    cp "$BUILD/libresonancefx.so" "$OUT/libresonancefx.so"
-    echo "built $ABI -> out/engine/$ABI/libresonancefx.so"
+    for f in "$BUILD"/libresonancefx*.so; do
+        [ -f "$f" ] && cp "$f" "$OUT/"
+    done
+    echo "built $ABI -> out/engine/$ABI/"
 done

@@ -8,6 +8,7 @@ import io.github.resonancefx.service.EngineService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 
 /** Everything the status screen shows, gathered from the platform and the live engine. */
 data class DriverStatus(
@@ -24,6 +25,7 @@ data class DriverStatus(
     val processing: Boolean?,
     val kernelLoaded: Boolean?,
     val features: Int?,
+    val factory: String?,
     val disableReason: String?,
     val sessionError: String?,
     val assetError: String?,
@@ -48,6 +50,7 @@ data class DriverStatus(
         appendLine("Attached: $attached")
         appendLine("Driver: $versionName ($versionCode) $architecture")
         appendLine("Stream: ${sampleRate ?: "?"} Hz, ${channels ?: "?"} ch, configured=$configured, processing=$processing")
+        appendLine("Effect factory: ${factory ?: "not installed"}")
         appendLine("Convolver kernel loaded: $kernelLoaded")
         disableReason?.let { appendLine("Disable reason: $it") }
         sessionError?.let { appendLine("Session error: $it") }
@@ -79,6 +82,7 @@ data class DriverStatus(
                     processing = live?.getInt(Params.GET_STREAMING)?.let { it == 1 },
                     kernelLoaded = live?.getInt(Params.GET_CONVOLUTION_KERNEL_ID)?.let { it != 0 },
                     features = fx?.getInt(Params.GET_FEATURES),
+                    factory = detectFactory(),
                     disableReason = if (live != null && reason != null && reason != 0)
                         live.getString(Params.GET_DISABLE_REASON_MESSAGE)?.ifBlank { null } ?: "code $reason" else null,
                     sessionError = manager?.error?.value,
@@ -86,6 +90,34 @@ data class DriverStatus(
                 )
             } finally {
                 probe?.close()
+            }
+        }
+
+        /**
+         * Which effect-factory generation the module had to target, read back from the config it
+         * patched (the app cannot write /vendor itself; the module applies it as root). AIDL
+         * configs live in audio_effects_config*.xml, HIDL/legacy ones in audio_effects*.xml.
+         */
+        private fun detectFactory(): String? {
+            fun carries(path: String): Boolean = runCatching {
+                File(path).readText().contains(Params.UUID_ENGINE.toString())
+            }.getOrDefault(false)
+            val aidl = listOf(
+                "/odm/etc/audio_effects_config.xml",
+                "/vendor/etc/audio_effects_config.xml",
+                "/vendor/etc/audio_effects_config_sec.xml",
+            ).any(::carries)
+            val legacy = listOf(
+                "/odm/etc/audio_effects.xml",
+                "/vendor/etc/audio_effects.xml",
+                "/vendor/etc/audio_effects_sec.xml",
+                "/vendor/etc/audio_effects_spatializer.xml",
+            ).any(::carries)
+            return when {
+                aidl && legacy -> "AIDL + legacy"
+                aidl -> "AIDL"
+                legacy -> "HIDL/legacy"
+                else -> null
             }
         }
     }

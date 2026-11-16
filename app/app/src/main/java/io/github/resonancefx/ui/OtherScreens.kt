@@ -191,6 +191,7 @@ fun StatusScreen() {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Fact("Driver", status.versionName?.let { "$it (${status.versionCode})" } ?: "—")
                     Fact("Architecture", status.architecture ?: "—")
+                    Fact("Effect factory", status.factory ?: "module not detected")
                     Fact("Sample rate", status.sampleRate?.let { "$it Hz" } ?: "—")
                     Fact("Channels", status.channels?.toString() ?: "—")
                     Fact("Convolver", when (status.kernelLoaded) { true -> "Impulse response loaded"; false -> "No impulse response"; null -> "—" })
@@ -217,7 +218,7 @@ fun StatusScreen() {
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
-        if (!status.registered) item { Troubleshooting() }
+        if (!status.registered) item { Troubleshooting(status.factory) }
     }
 }
 
@@ -245,7 +246,7 @@ private fun Fact(label: String, value: String) {
 }
 
 @Composable
-private fun Troubleshooting() {
+private fun Troubleshooting(factory: String? = null) {
     Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -253,6 +254,9 @@ private fun Troubleshooting() {
                 Text("The engine isn't loaded", style = MaterialTheme.typography.titleMedium)
             }
             Text("1. Flash ResonanceFX-<version>.zip in Magisk, KernelSU or APatch and reboot.")
+            if (factory != null && factory.startsWith("AIDL")) {
+                Text("This ROM uses the AIDL audio-effect HAL. A module build without the AIDL engine cannot register here - check the module description after the next boot.")
+            }
             Text("2. In your root manager, tap the module's Action button: it re-patches, re-mounts and restarts audio, then reports what it found.")
             Text("3. Remove other audio-effect modules that install the same engine — the installer disables them, but leftovers in /vendor can conflict.")
             Text("4. Still failing? Copy the report above together with /data/adb/resonancefx/logs.")

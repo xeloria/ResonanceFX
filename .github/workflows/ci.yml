@@ -36,6 +36,8 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends busybox
           bash tests/test-patch.sh "busybox sh"
+      - name: Effect factory detection and entry shapes
+        run: bash tests/test-factory.sh
       - name: Module action diagnostics
         run: bash tests/test-action.sh
       - name: Engine host tests (ASan/UBSan)

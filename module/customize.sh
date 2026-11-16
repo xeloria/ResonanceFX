@@ -29,7 +29,26 @@ fi
 echo "$TARGETS" | while read -r libdir abi; do rfx_print "- Engine: $abi -> $libdir/soundfx"; done
 
 rfx_print "- Installing engine libraries"
+# An update starts from a clean mount layer: drop binds left by the previous version and remove
+# its stage/state so a stale entry can never make the diagnostics lie. Recovery installs have no
+# running system to clean up after (and mounts there die with the session).
+if rfx_in_recovery; then
+    rfx_print "- Recovery session: skipping mount cleanup"
+else
+    rfx_print "- Clearing leftovers from the previous install"
+    rfx_unmount_all
+fi
+rm -rf "$RFX_STAGE" "$RFX_STATE/configs" "$RFX_STATE/factory_used"
 rfx_stage_libraries
+
+rfx_print "- Detecting the effect factory"
+rfx_record_factory_mode
+FACTORY="$(rfx_factory_mode)"
+rfx_print "  + $FACTORY"
+if [ "$FACTORY" = aidl ] && [ -z "$(rfx_aidl_lib)" ]; then
+    rfx_print "! This ROM uses the AIDL effect HAL and this build only has the legacy engine."
+    rfx_print "! The effect engine will not load on this device."
+fi
 
 rfx_print "- Patching audio effects configurations"
 rfx_generate_configs
