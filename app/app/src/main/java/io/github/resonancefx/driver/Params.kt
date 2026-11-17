@@ -87,6 +87,9 @@ object Params {
     // Differential surround
     const val DIFFERENTIAL_SURROUND_ENABLE = 65557
     const val DIFFERENTIAL_SURROUND_DELAY = 65558
+    const val DIFFERENTIAL_SURROUND_WIDTH = 65590
+    const val DIFFERENTIAL_SURROUND_HIGHPASS = 65591
+    const val DIFFERENTIAL_SURROUND_PROTECT = 65592
 
     // Reverberation
     const val REVERBERATION_ENABLE = 65559

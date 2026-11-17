@@ -350,6 +350,9 @@ object Catalog {
                 Slider("diff.delay", "Delay", 0..19, 4, { "${it + 1} ms" }) { fx, v ->
                     fx.set(Params.DIFFERENTIAL_SURROUND_DELAY, (v + 1) * 100)
                 },
+                Slider("diff.width", "Width", 0..200, 100, { "$it%" }) { fx, v ->
+                    fx.set(Params.DIFFERENTIAL_SURROUND_WIDTH, v)
+                },
             ),
         ),
         Section(

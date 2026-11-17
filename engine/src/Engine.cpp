@@ -288,9 +288,31 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
             field_.set((fieldDepth_ - 200) / 600.0f, (fieldMid_ - 100) / 100.0f);
             return 0;
 
-        case kDiffSurroundEnable: stHaas_.target = on; return 0;
-        case kDiffSurroundDelay: haasMs_ = clampv(a, 100, 2000) / 100.0f; haas_.setDelayMs(haasMs_); return 0;
-
+        case kDiffSurroundEnable: 
+            stHaas_.target = on; 
+            return 0;
+            
+        case kDiffSurroundDelay: 
+            // UI sends 100..2000, convert to 1.0..20.0 ms
+            haasMs_ = clampv(a, 100, 2000) / 100.0f; 
+            haas_.setDelayMs(haasMs_); 
+            return 0;
+            
+        case kDiffSurroundWidth:
+            // UI sends 0..200, convert to 0.0..2.0 gain multiplier
+            haas_.setWidth(clampv(a, 0, 200) / 100.0f); 
+            return 0;
+            
+        case kDiffSurroundHighpass:
+            // UI sends 80..250 Hz
+            haas_.setHighpassHz(static_cast<float>(clampv(a, 80, 250))); 
+            return 0;
+            
+        case kDiffSurroundProtect:
+            // UI sends 0 (off) or 1 (on)
+            haas_.setMonoProtection(on); 
+            return 0;
+        
         case kReverbEnable: stReverb_.target = on; return 0;
         case kReverbRoomSize: reverb_p_.size = clampv(a, 0, 100); applyReverb(); return 0;
         case kReverbWidth: reverb_p_.width = clampv(a, 0, 100); applyReverb(); return 0;

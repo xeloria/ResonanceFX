@@ -338,8 +338,16 @@ int main() {
     report("field", "Field surround", "strength 4, mid image 50 %", [](Fx& f) {
         f.set(kFieldSurroundDepth, {500}); f.set(kFieldSurroundMidImage, {150}); f.set(kFieldSurroundEnable, {1});
     }, kSpatial);
-    report("diff", "Differential surround", "5 ms", [](Fx& f) { f.set(kDiffSurroundDelay, {500}); f.set(kDiffSurroundEnable, {1}); },
-           kSpatial);
+    
+    // Differential surround measurement settings.
+    report("diff", "Differential surround", "5 ms, width 100%, side high-pass 120 Hz", [](Fx& f) {
+        f.set(kDiffSurroundDelay, {500}); 
+        f.set(kDiffSurroundWidth, {100}); 
+        f.set(kDiffSurroundHighpass, {120}); 
+        f.set(kDiffSurroundProtect, {1}); 
+        f.set(kDiffSurroundEnable, {1}); 
+    }, kSpatial);
+    
     report("vhe", "Headphone surround+", "quality 3", [](Fx& f) {
         f.set(kHeadphoneSurroundLevel, {2}); f.set(kHeadphoneSurroundEnable, {1});
     }, kCrossfeed | kSpatial);
