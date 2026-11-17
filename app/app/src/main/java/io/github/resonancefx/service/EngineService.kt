@@ -109,7 +109,16 @@ class EngineService : LifecycleService() {
                 sessions.setRuntime(Params.INPUT_LEVEL_OFFSET, if (preScaled) db.coerceAtLeast(-9600) else 0)
             }
         }
-        headTracker = HeadTracker(this) { yaw -> lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.SPATIAL_YAW, yaw) } }
+        headTracker = HeadTracker(this) { quaternion, yaw ->
+            lifecycleScope.launch(engineThread) {
+                // Full 3DoF where the engine understands it; yaw-only on older engines.
+                if (sessions.supports(Params.FEATURE_HEAD_ORIENTATION)) {
+                    sessions.setRuntime(Params.SPATIAL_ORIENTATION, quaternion)
+                } else {
+                    sessions.setRuntime(Params.SPATIAL_YAW, yaw)
+                }
+            }
+        }
         orientation = OrientationWatcher(this) { sideways ->
             lifecycleScope.launch(engineThread) { sessions.setRuntime(Params.CROSSTALK_ORIENTATION, if (sideways) 100 else 0) }
         }
@@ -141,7 +150,12 @@ class EngineService : LifecycleService() {
         lifecycleScope.launch {
             combine(repository.route, sessions.attached, sessions.error) { r, a, e -> Triple(r, a, e) }
                 .distinctUntilChanged()
-                .collect { updateNotification() }
+                .collect {
+                    // A fresh engine may advertise 3DoF now, so re-send the current orientation
+                    // instead of waiting for the head to move.
+                    headTracker.resend()
+                    updateNotification()
+                }
         }
         // Watchdog: re-attach after audioserver restarts and re-upload the impulse response when
         // the output sample rate changes (e.g. switching to a 96 kHz USB DAC). The first tick

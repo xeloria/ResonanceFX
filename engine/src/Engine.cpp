@@ -209,6 +209,7 @@ int Engine::setParameter(int32_t id, const uint8_t* value, uint32_t size) {
         case kDynamicEqBands:
         case kSpeakerCorrection:
         case kSpeakerProtectCeilings:
+        case kSpatialOrientation:
             return setPayload(id, value, size);
         default:
             break;
@@ -447,7 +448,11 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
         case kSpatialEnable: spatial_p_.spatial = on; applySpatial(); return 0;
         case kSpatialAngle: spatial_p_.angle = clampv(a, 10, 90); applySpatial(); return 0;
         case kSpatialRoom: spatial_p_.room = clampv(a, 0, 100); applySpatial(); return 0;
-        case kSpatialYaw: spatial_p_.yawX100 = clampv(a, -18000, 18000); applySpatial(); return 0;
+        case kSpatialYaw:
+            spatial_p_.yawX100 = clampv(a, -18000, 18000);
+            spatial_p_.orientation = false;  // an older app: yaw-only tracking
+            applySpatial();
+            return 0;
         case kSpatialTracking: spatial_p_.tracking = on; applySpatial(); return 0;
 
         case kSpeakerProfile:
@@ -587,6 +592,20 @@ int Engine::setPayload(int32_t id, const uint8_t* value, uint32_t size) {
             const auto c = floats(4, kBands);
             for (uint32_t b = 0; b < kBands; ++b) protectSettings_.ceilingDb[b] = clampv(c[b], -60.0f, 0.0f);
             protect_.set(protectSettings_);
+            return 0;
+        }
+        case kSpatialOrientation: {
+            if (count != 4 || 4 > floatsAvailable) return -EINVAL;
+            const auto q = floats(4, 4);
+            const float n = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+            if (!(n > 1e-6f) || !std::isfinite(n)) return -EINVAL;
+            spatial_p_.quatW = q[0] / n;
+            spatial_p_.quatX = q[1] / n;
+            spatial_p_.quatY = q[2] / n;
+            spatial_p_.quatZ = q[3] / n;
+            if (!spatial_p_.orientation) RFX_LOGI("spatial: 3DoF head tracking");
+            spatial_p_.orientation = true;
+            applySpatial();
             return 0;
         }
         case kDynamicEqBands: {
@@ -781,11 +800,17 @@ void Engine::applySpatial() {
         s.angleDeg = static_cast<float>(spatial_p_.angle);
         s.room = spatial_p_.room / 100.0f;
         s.tracking = spatial_p_.tracking;
+        s.orientation = spatial_p_.orientation;
+        s.quatW = spatial_p_.quatW;
+        s.quatX = spatial_p_.quatX;
+        s.quatY = spatial_p_.quatY;
+        s.quatZ = spatial_p_.quatZ;
         s.yawDeg = spatial_p_.tracking ? spatial_p_.yawX100 / 100.0f : 0.0f;
     } else {
         s.angleDeg = kAngle[spatial_p_.vheLevel];
         s.room = kRoom[spatial_p_.vheLevel];
         s.tracking = false;
+        s.orientation = false;
         s.yawDeg = 0.0f;
     }
     hrtf_.set(s);
@@ -811,16 +836,16 @@ void Engine::updateHrtfCompensation(const HrtfSpatializer::Settings& s) {
     if (key == hrtfCompKey_) return;
     hrtfCompKey_ = key;
 
-    HrtfSpatializer probe;
-    probe.prepare(fs_);
+    // The compensation is the renderer's own frontal response, so measure it from the table
+    // already built instead of preparing a second renderer (14 elevations x 37 azimuths is
+    // far too expensive to do again every time the angle or room control moves).
     HrtfSpatializer::Settings ps = s;
     ps.yawDeg = 0.0f;
     ps.tracking = false;
-    probe.set(ps);
+    ps.orientation = false;
     const int n = 8192;
     std::vector<float> l(n, 0.0f), r(n, 0.0f);
-    l[0] = r[0] = 1.0f;
-    probe.process(l.data(), r.data(), n);
+    hrtf_.impulseResponse(ps, l, r, n);
 
     const int count = geq::bandCount(geq::kThird31);
     const double* centres = geq::centers(geq::kThird31);

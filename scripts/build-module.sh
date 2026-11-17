@@ -6,7 +6,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(sed -n 's/^version=//p' "$ROOT/module/module.prop")"
+VERSION="$(sed -n 's/^version=//p' "$ROOT/module/module.prop" | tr -d '\r')"
 STAGE="$ROOT/build/module"
 ZIP="$ROOT/out/ResonanceFX-$VERSION.zip"
 
@@ -30,7 +30,7 @@ find "$STAGE" -name '*.sh' -o -name '*.prop' -o -name 'update-binary' -o -name '
     while read -r f; do sed -i 's/\r$//' "$f"; done
 
 rm -f "$ZIP"
-python - "$STAGE" "$ZIP" <<'EOF'
+python3 - "$STAGE" "$ZIP" <<'EOF'
 import os, sys, zipfile
 stage, out = sys.argv[1], sys.argv[2]
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:

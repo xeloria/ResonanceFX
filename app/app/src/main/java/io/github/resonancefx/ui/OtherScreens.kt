@@ -401,9 +401,10 @@ private fun LicensesDialog(onDismiss: () -> Unit) {
                     Spacer(Modifier.size(16.dp))
                     Text("MIT KEMAR HRTF measurements", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Spatial audio uses head-related impulse responses from W. G. Gardner and K. D. Martin, " +
-                            "\"HRTF Measurements of a KEMAR Dummy-Head Microphone\", MIT Media Lab Perceptual Computing " +
-                            "Technical Report #280, 1994.",
+                        "Spatial audio uses the 710 head-related impulse responses measured by W. G. Gardner and " +
+                            "K. D. Martin, \"HRTF Measurements of a KEMAR Dummy-Head Microphone\", MIT Media Lab " +
+                            "Perceptual Computing Technical Report #280, 1994: elevations -40 to +90 degrees, " +
+                            "rendered at their measured azimuth and elevation.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(Modifier.size(16.dp))

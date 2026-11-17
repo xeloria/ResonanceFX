@@ -63,6 +63,7 @@ enum Feature : uint32_t {
     kFeatureLevelOffset = 1u << 14,  // kInputLevelOffset and kAgcMaxCut
     kFeatureAbx = 1u << 15,          // blind listening test (kAbx*)
     kFeatureMeasuredProtection = 1u << 16,  // kSpeakerProtectCeilings / kSpeakerProtectMode
+    kFeatureHeadOrientation = 1u << 17,     // kSpatialOrientation (full 3DoF tracking)
 };
 
 // ---- Housekeeping -----------------------------------------------------------------------------
@@ -219,6 +220,10 @@ enum Param : int32_t {
     kSpatialRoom = 65767,   // 0..100 %
     kSpatialYaw = 65768,    // head yaw, degrees x100 (runtime, from head tracking)
     kSpatialTracking = 65769,
+    // Head orientation as a unit quaternion (w, x, y, z), head -> world, x right, y forward,
+    // z up. 20-byte payload [4][w][x][y][z] floats, sent ~30 times a second while tracking.
+    // Replaces kSpatialYaw when the app sees kFeatureHeadOrientation.
+    kSpatialOrientation = 65793,
 
     // Speaker correction (enabled by kSpeakerOptimization). Profile 0 phone, 1 tablet, 2 laptop,
     // 3 small Bluetooth speaker, 4 large Bluetooth / home speaker, 5 car, 6 TV, 7 measured.

@@ -320,12 +320,13 @@ object Catalog {
         ),
         Section(
             "spatial", "Spatial audio",
-            "Virtual speakers in a room for headphones, measured on a real head (MIT KEMAR), with head tracking.",
+            "Virtual speakers in a room for headphones, measured on a real head (MIT KEMAR, " +
+                "710 positions), with 3DoF head tracking: turn, tilt and roll.",
             "spatial.enable", Params.SPATIAL_ENABLE,
             listOf(
                 Slider("spatial.angle", "Speaker angle", 10..90, 30, { "±$it°" }) { fx, v -> fx.set(Params.SPATIAL_ANGLE, v) },
                 Slider("spatial.room", "Room", 0..100, 30, { "$it%" }) { fx, v -> fx.set(Params.SPATIAL_ROOM, v) },
-                Toggle("spatial.tracking", "Head tracking (supported headphones)", false) { fx, v ->
+                Toggle("spatial.tracking", "3DoF head tracking (supported headphones)", false) { fx, v ->
                     fx.set(Params.SPATIAL_TRACKING, v)
                 },
             ),

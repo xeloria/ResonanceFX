@@ -19,14 +19,10 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
-import kotlin.math.PI
-import kotlin.math.atan2
-import kotlin.math.cos
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.log10
 import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
  * Reports the music stream's volume in dBFS x100 (what loudness compensation follows) and whether
@@ -150,11 +146,13 @@ class OrientationWatcher(context: Context, private val onSideways: (Boolean) -> 
 }
 
 /**
- * Head yaw from a head-tracking headset (Android 13+ dynamic HEAD_TRACKER sensor), in degrees
- * x100, positive when the head turns right. "Front" slowly follows where the listener keeps
- * facing, so the sound stage re-centres after turning in a chair or walking around a corner.
+ * Head orientation from a head-tracking headset (Android 13+ dynamic HEAD_TRACKER sensor).
+ * Delivers the full orientation as a unit quaternion plus the yaw in degrees x100 (positive
+ * when the head turns right) for engines that only understand yaw. "Front" slowly follows
+ * where the listener keeps facing, so the sound stage re-centres after turning in a chair or
+ * walking around a corner; pitch and roll stay gravity-referenced.
  */
-class HeadTracker(context: Context, private val onYaw: (Int) -> Unit) {
+class HeadTracker(context: Context, private val onOrientation: (FloatArray, Int) -> Unit) {
     private val sensors = context.getSystemService(SensorManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private var sensor: Sensor? = null
@@ -162,7 +160,9 @@ class HeadTracker(context: Context, private val onYaw: (Int) -> Unit) {
     private var reference = Float.NaN
     private var lastEventMs = 0L
     private var lastSentMs = 0L
-    private var lastSent = Int.MIN_VALUE
+    private var lastSent = HeadOrientation.IDENTITY
+    private var lastSentYaw = Int.MIN_VALUE
+    private var sent = false
 
     private val listener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) = handle(event.values)
@@ -194,22 +194,16 @@ class HeadTracker(context: Context, private val onYaw: (Int) -> Unit) {
             Log.i(TAG, "Head tracking with ${next.name}")
             sensors.registerListener(listener, next, SensorManager.SENSOR_DELAY_GAME, handler)
         } else {
-            send(0)
+            send(HeadOrientation.IDENTITY, 0)
         }
     }
 
     private fun handle(v: FloatArray) {
         if (v.size < 3) return
         // values[0..2]: rotation vector (axis x angle, radians) of the head in the tracker's
-        // frame: X right ear, Y nose, Z up. Yaw is the rotation about Z.
-        val angle = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
-        val s = if (angle > 1e-6f) sin(angle / 2) / angle else 0.5f
-        val w = cos(angle / 2)
-        val x = v[0] * s
-        val y = v[1] * s
-        val z = v[2] * s
-        // Counter-clockwise about Z (seen from above) is a turn to the left: negate.
-        val yaw = -(atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)) * 180f / PI.toFloat())
+        // frame: X right ear, Y nose, Z up.
+        val q = HeadOrientation.fromRotationVector(v)
+        val yaw = HeadOrientation.yawDegrees(q)
 
         val now = SystemClock.elapsedRealtime()
         val dt = ((now - lastEventMs).coerceIn(0, 1000)) / 1000f
@@ -217,17 +211,30 @@ class HeadTracker(context: Context, private val onYaw: (Int) -> Unit) {
         if (reference.isNaN()) reference = yaw
         // Re-centre with a 12 s time constant, along the shortest way round.
         reference = wrap(reference + wrap(yaw - reference) * (1 - exp(-dt / RECENTRE_SECONDS)))
-        val relative = (wrap(yaw - reference) * 100).roundToInt()
-        // About 30 updates a second is plenty; skip changes under half a degree.
-        if (now - lastSentMs >= 33 && kotlin.math.abs(relative - lastSent) >= 50) {
-            lastSentMs = now
-            send(relative)
+        val relative = HeadOrientation.recentre(q, reference)
+        val yawX100 = (wrap(yaw - reference) * 100).roundToInt()
+        // About 30 updates a second is plenty; skip changes under 0.2 degrees, and the legacy
+        // yaw-only value under half a degree.
+        if (now - lastSentMs >= 33) {
+            val turned = !sent || HeadOrientation.angleDegrees(relative, lastSent) >= 0.2f
+            if (turned || abs(yawX100 - lastSentYaw) >= 50) {
+                lastSentMs = now
+                send(relative, yawX100)
+            }
         }
     }
 
-    private fun send(yaw: Int) {
-        lastSent = yaw
-        onYaw(yaw)
+    /** Re-sends the last orientation, e.g. after the engine attached and can now take 3DoF. */
+    fun resend() {
+        if (!wanted) return
+        if (sent) send(lastSent, lastSentYaw) else send(HeadOrientation.IDENTITY, 0)
+    }
+
+    private fun send(quaternion: FloatArray, yaw: Int) {
+        sent = true
+        lastSent = quaternion
+        lastSentYaw = yaw
+        onOrientation(quaternion, yaw)
     }
 
     private fun wrap(deg: Float): Float {

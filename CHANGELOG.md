@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.3.0
+
+Changed:
+
+- **Engine**: spatial audio now tracks the head in three degrees of freedom. The app sends the
+  head-tracker quaternion (not just yaw), the renderer rotates every virtual source by the
+  inverse orientation and looks it up at its resulting azimuth *and elevation*. The MIT KEMAR
+  table was regenerated from the complete 710-position archive (14 elevations from -40 to +90
+  degrees, 37 azimuths, one pinna mirrored for a symmetric median plane) and is interpolated
+  bilinearly; the previous table only had the horizontal plane. Filters and interaural delays
+  are still split into minimum-phase responses and pure delays, and changes are crossfaded per
+  32-sample block. The yaw-only parameter keeps working for older apps, and the renderer's
+  compensation EQ is now measured from the existing table instead of preparing a second one.
+- **App**: head tracking sends the orientation quaternion when the engine advertises
+  `kFeatureHeadOrientation`, and falls back to yaw for older engines. Only the heading is
+  recentred (12 s time constant); pitch and roll stay gravity-referenced, so a deliberate tilt
+  is not slowly cancelled. Updates are sent about 30 times a second when the orientation moved
+  by 0.2 degrees.
+- **Data**: `scripts/gen-kemar.py` regenerates the HRIR table from the MIT archive. The
+  horizontal layer is now derived from the same full set as the other elevations (the old
+  table came from the separate compact set), so the default timbre may differ slightly; the
+  compensation EQ re-fits itself to it.
+
 ## v2.2.2
 
 Fixed:

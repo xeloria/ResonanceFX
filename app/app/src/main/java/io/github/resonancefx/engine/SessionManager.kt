@@ -6,6 +6,7 @@ package io.github.resonancefx.engine
 import android.util.Log
 import io.github.resonancefx.data.AttachMode
 import io.github.resonancefx.data.Settings
+import io.github.resonancefx.driver.Codec
 import io.github.resonancefx.driver.EngineEffect
 import io.github.resonancefx.driver.Params
 import io.github.resonancefx.model.Catalog
@@ -25,8 +26,15 @@ class SessionManager(private val applier: Applier) {
     private var settings: Settings = Settings.DEFAULT
     private var mode = AttachMode.GLOBAL
     private var started = false  // setMode() has run: attaching is wanted
-    // Values the service measures (system volume, head yaw), re-sent to every new instance.
+    // Values the service measures (system volume, head orientation), re-sent to every new
+    // instance. Scalar measurements and array payloads (the head-tracking quaternion) live in
+    // separate maps because they travel through different parameter encodings.
     private val runtime = LinkedHashMap<Int, Int>()
+    private val runtimePayload = LinkedHashMap<Int, ByteArray>()
+
+    /** Feature bitmask of the attached engine (0 when it predates GET_FEATURES). */
+    var features = 0
+        private set
     // Effects paused while the app measures a speaker.
     private var bypassed = false
 
@@ -77,6 +85,17 @@ class SessionManager(private val applier: Applier) {
         effects.values.forEach { (_, fx) -> runSafely { fx.set(param, value) } }
     }
 
+    /** Sends an array measurement (e.g. the head-tracking quaternion) as a [count][floats] payload. */
+    fun setRuntime(param: Int, values: FloatArray) {
+        val payload = Codec.floatArray(values.size, values, 4 + values.size * 4)
+        val previous = runtimePayload[param]
+        if (previous != null && previous.contentEquals(payload)) return
+        runtimePayload[param] = payload
+        effects.values.forEach { (_, fx) -> runSafely { fx.set(param, payload) } }
+    }
+
+    fun supports(feature: Int): Boolean = features and feature != 0
+
     /** Pauses every instance (true) or restores the master switch (false). */
     fun setBypass(on: Boolean) {
         bypassed = on
@@ -106,6 +125,7 @@ class SessionManager(private val applier: Applier) {
     private fun applyAll(fx: EngineEffect) {
         applier.applyAll(fx, settings)
         runtime.forEach { (param, value) -> fx.set(param, value) }
+        runtimePayload.forEach { (param, payload) -> fx.set(param, payload) }
         if (bypassed) fx.enabled = false
     }
 
@@ -119,6 +139,7 @@ class SessionManager(private val applier: Applier) {
         if (effects.containsKey(sessionId)) return
         try {
             val fx = EngineEffect(sessionId)
+            features = fx.getInt(Params.GET_FEATURES) ?: 0
             effects[sessionId] = packageName to fx
             try {
                 applyAll(fx)

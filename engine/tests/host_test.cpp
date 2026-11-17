@@ -5,6 +5,7 @@
 // framework: through the exported AELI entry point and the effect_interface_s command/process
 // calls. Build with ASan/UBSan (see tests/run-engine-tests.sh).
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -15,7 +16,10 @@
 #include <zlib.h>
 
 #include "android/android_effect_abi.h"
+#include "rfx/modules/Binaural.h"
 #include "test_protocol.h"
+
+using rfx::HrtfSpatializer;
 
 extern "C" audio_effect_library_t AELI;
 
@@ -872,6 +876,102 @@ static void testConcurrentCommands() {
     control.join();
 }
 
+// ---- 3DoF head tracking -------------------------------------------------------------------------
+static void testHrtfOrientation() {
+    float az = 0, el = 0;
+    // Identity leaves the direction unchanged.
+    HrtfSpatializer::headDirection(30, 12, 1, 0, 0, 0, &az, &el);
+    CHECK(fabsf(az - 30) < 1e-3f && fabsf(el - 12) < 1e-3f, "identity direction %.3f %.3f", az, el);
+
+    // Head turned 30 degrees left (q = Rz(+30)): the world front appears 30 degrees right.
+    float h = 30.0f * (float) M_PI / 180.0f / 2.0f;
+    HrtfSpatializer::headDirection(0, 0, cosf(h), 0, 0, sinf(h), &az, &el);
+    CHECK(fabsf(az - 30) < 1e-3f && fabsf(el) < 1e-3f, "yaw direction %.3f %.3f", az, el);
+
+    // Head pitched 90 degrees up (q = Rx(+90)): the world front is directly below the head.
+    h = 45.0f * (float) M_PI / 180.0f;
+    HrtfSpatializer::headDirection(0, 0, cosf(h), sinf(h), 0, 0, &az, &el);
+    CHECK(fabsf(el + 90.0f) < 1e-2f, "pitch direction elevation %.3f", el);
+
+    // Right ear down 90 degrees (q = Ry(+90)): the world's right is now above the head.
+    HrtfSpatializer::headDirection(90, 0, cosf(h), 0, sinf(h), 0, &az, &el);
+    CHECK(fabsf(el - 90.0f) < 1e-2f, "roll direction elevation %.3f", el);
+
+    HrtfSpatializer hrtf;
+    hrtf.prepare(48000.0);
+    HrtfSpatializer::Settings base;
+    base.angleDeg = 30.0f;
+    base.room = 0.0f;
+    base.tracking = false;
+    const int n = 4096;
+    std::vector<float> l(n), r(n);
+    hrtf.impulseResponse(base, l, r, n);
+    double energy = 0;
+    bool finite = true;
+    for (int i = 0; i < n; ++i) {
+        energy += static_cast<double>(l[i]) * l[i] + static_cast<double>(r[i]) * r[i];
+        finite &= std::isfinite(l[i]) && std::isfinite(r[i]);
+    }
+    CHECK(finite && energy > 0.1, "HRTF impulse response invalid (energy %f)", energy);
+
+    // The impulse must match what process() renders for the same settings: the compensation EQ
+    // path relies on that equality.
+    hrtf.set(base);
+    hrtf.reset();
+    std::vector<float> pl(n, 0.0f), pr(n, 0.0f);
+    pl[0] = pr[0] = 1.0f;
+    hrtf.process(pl.data(), pr.data(), n);
+    double diff = 0;
+    for (int i = 0; i < n; ++i) diff = std::max({diff, (double) fabsf(l[i] - pl[i]), (double) fabsf(r[i] - pr[i])});
+    CHECK(diff < 1e-4, "impulseResponse differs from process by %g", diff);
+
+    // Legacy yaw 20 and the equivalent quaternion must render identically.
+    HrtfSpatializer::Settings yaw = base;
+    yaw.tracking = true;
+    yaw.yawDeg = 20.0f;
+    HrtfSpatializer::Settings quat = base;
+    quat.tracking = true;
+    quat.orientation = true;
+    const float hq = -20.0f * (float) M_PI / 180.0f / 2.0f;  // q = Rz(-yaw)
+    quat.quatW = cosf(hq);
+    quat.quatZ = sinf(hq);
+    std::vector<float> yl(n), yr(n), ql(n), qr(n);
+    hrtf.impulseResponse(yaw, yl, yr, n);
+    hrtf.impulseResponse(quat, ql, qr, n);
+    double ydiff = 0;
+    for (int i = 0; i < n; ++i) ydiff = std::max({ydiff, (double) fabsf(yl[i] - ql[i]), (double) fabsf(yr[i] - qr[i])});
+    CHECK(ydiff < 1e-5, "legacy yaw and quaternion differ by %g", ydiff);
+
+    // Pitch must actually change the rendering (elevation is used, not just yaw).
+    HrtfSpatializer::Settings up = base;
+    up.tracking = true;
+    up.orientation = true;
+    const float hp = 30.0f * (float) M_PI / 180.0f / 2.0f;
+    up.quatW = cosf(hp);
+    up.quatX = sinf(hp);
+    std::vector<float> ul(n), ur(n);
+    hrtf.impulseResponse(up, ul, ur, n);
+    double pdiff = 0;
+    for (int i = 0; i < n; ++i) pdiff = std::max({pdiff, (double) fabsf(ul[i] - l[i]), (double) fabsf(ur[i] - r[i])});
+    CHECK(pdiff > 1e-3, "pitch did not change the HRTF render");
+}
+
+static void testHeadOrientationParam() {
+    Fx fx;
+    fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+    CHECK((fx.getInt(kGetFeatures) & kFeatureHeadOrientation) != 0,
+          "features must advertise head orientation");
+    // [count][w, x, y, z] (count is an integer, the quaternion floats follow it)
+    struct {
+        uint32_t count;
+        float q[4];
+    } payload{4, {1.0f, 0.0f, 0.0f, 0.0f}};
+    CHECK(fx.setParam(kSpatialOrientation, &payload, sizeof(payload)) == 0,
+          "orientation payload accepted");
+    uint32_t bad[4] = {3, 0, 0, 0};
+    CHECK(fx.setParam(kSpatialOrientation, bad, sizeof(bad)) != 0, "short orientation payload rejected");
+}
+
 int main() {
     testLibraryInfo();
     testLifecycleAndGetters();
@@ -888,6 +988,8 @@ int main() {
     testAccumulate();
     testConvolverUpload();
     testHeadphoneSurround();
+    testHrtfOrientation();
+    testHeadOrientationParam();
     testParametricEq();
     testSpeakerModules();
     testBassStepless();

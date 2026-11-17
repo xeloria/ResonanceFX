@@ -11,7 +11,8 @@ modern Material You app.
 - **28 effect modules**: 10-band equalizer (56 presets), 15/31-band graphic EQ, parametric EQ
   (up to 32 bands), AutoEQ (thousands of headphones), loudness compensation (ISO 226, follows
   the volume), multiband compressor, dynamic EQ, de-esser, vocals & ambience (centre
-  extraction), spatial audio (MIT KEMAR HRTF, head tracking on Android 13+), convolver (impulse responses,
+  extraction), spatial audio (710-position MIT KEMAR HRTF, 3DoF head tracking on Android 13+),
+  convolver (impulse responses,
   auto-resampled to the live output rate), headphone correction (`.vdc` profiles), FET
   compressor, playback gain control, bass and clarity enhancers, field/differential surround,
   headphone surround, reverb, dynamic system (103 headphone profiles), tube simulator, analog

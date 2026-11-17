@@ -17,7 +17,8 @@ Third-party data
 ----------------
 
 Head-related impulse responses in engine/src/core/src/data/KemarHrir.cpp are derived from the
-MIT KEMAR measurements: W. G. Gardner and K. D. Martin, "HRTF Measurements of a KEMAR Dummy-Head
+complete MIT KEMAR set (710 positions, elevations -40 to +90 degrees; regenerate with
+scripts/gen-kemar.py): W. G. Gardner and K. D. Martin, "HRTF Measurements of a KEMAR Dummy-Head
 Microphone", MIT Media Lab Perceptual Computing Technical Report #280, 1994. Free to use with
 this citation.
 

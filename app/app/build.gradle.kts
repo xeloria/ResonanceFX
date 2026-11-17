@@ -15,8 +15,8 @@ android {
         // Compose requires API 23; the root module itself supports API 21+.
         minSdk = 23
         targetSdk = 36
-        versionCode = 20202
-        versionName = "2.2.2"
+        versionCode = 20300
+        versionName = "2.3.0"
     }
 
     // Release key from the environment (CI secrets or your shell): RFX_KEYSTORE (path),

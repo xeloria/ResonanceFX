@@ -48,6 +48,7 @@ object Params {
     const val FEATURE_LEVEL_OFFSET = 0x4000
     const val FEATURE_ABX = 0x8000
     const val FEATURE_MEASURED_PROTECTION = 0x10000
+    const val FEATURE_HEAD_ORIENTATION = 0x20000
 
     // Setters outside the effect range
     /** 1 = timestamp every processed buffer so GET_STREAMING works. */
@@ -199,8 +200,9 @@ object Params {
     const val SPATIAL_ENABLE = 65765
     const val SPATIAL_ANGLE = 65766        // degrees
     const val SPATIAL_ROOM = 65767         // %
-    const val SPATIAL_YAW = 65768          // degrees x100, runtime
+    const val SPATIAL_YAW = 65768          // degrees x100, runtime (legacy yaw-only engines)
     const val SPATIAL_TRACKING = 65769
+    const val SPATIAL_ORIENTATION = 65793  // [4][w,x,y,z] head -> world, runtime (3DoF)
 
     // Speaker correction, enabled by SPEAKER_OPTIMIZATION.
     const val SPEAKER_PROFILE = 65771      // 0 phone .. 6 TV, 7 measured

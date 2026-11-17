@@ -188,8 +188,9 @@ private:
     int geqLayout_ = 0;
     std::vector<float> geqDb_;
     struct {
-        bool vhe = false, spatial = false, tracking = false;
+        bool vhe = false, spatial = false, tracking = false, orientation = false;
         int vheLevel = 0, angle = 30, room = 30, yawX100 = 0;
+        float quatW = 1.0f, quatX = 0.0f, quatY = 0.0f, quatZ = 0.0f;
     } spatial_p_;
     fx::DynamicBass::Settings dynSettings_;
     DeEsser::Settings deessSettings_;
