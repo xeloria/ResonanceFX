@@ -32,10 +32,10 @@ class CatalogTest {
         assertEquals(keys.size, keys.toSet().size)
     }
 
-    @Test fun everySliderValueFormatsAndIndexesItsTable() {
+    @Test fun everySliderDefaultIsInRange() {
+        // Value formats need Android resources; they are exercised on the device.
         Catalog.sections.flatMap { it.controls }.filterIsInstance<Slider>().forEach { s ->
             assertTrue("${s.key} default out of range", s.default in s.range)
-            for (v in s.range) runCatching { s.format(v) }.onFailure { fail("${s.key}=$v: ${it.message}") }
         }
     }
 
@@ -50,7 +50,7 @@ class CatalogTest {
         assertEquals(22, Tables.OUTPUT_VOLUME_VALUES.size)
         assertEquals(100, Tables.OUTPUT_VOLUME_VALUES[11]) // default output gain = 0 dB
         assertEquals("0.0", Tables.OUTPUT_VOLUME_DB[11])
-        Tables.EQ_PRESETS.forEach { (name, v) -> assertEquals(name, 10, v.split(';').size) }
+        Tables.EQ_PRESETS.forEach { (_, v) -> assertEquals("EQ preset", 10, v.split(';').size) }
     }
 }
 

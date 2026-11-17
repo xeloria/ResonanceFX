@@ -52,6 +52,10 @@ import kotlinx.coroutines.withContext
  */
 class EngineService : LifecycleService() {
 
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(io.github.resonancefx.localization.AppLanguage.wrap(newBase))
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private val engineThread = Dispatchers.Default.limitedParallelism(1)
     private val repository get() = App.instance.repository
@@ -81,6 +85,7 @@ class EngineService : LifecycleService() {
         super.onCreate()
         audio = getSystemService(AudioManager::class.java)
         applier = Applier(
+            context = this,
             resolveAsset = { kind, name -> repository.assetFile(kind, name) },
             autoEq = { runCatching { AutoEqDatabase.get(this) }.getOrNull() },
         )

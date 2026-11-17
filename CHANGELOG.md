@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.4.0
+
+Added:
+
+- **App: six languages.** Japanese, Russian, Simplified Chinese, Spanish, Korean and French,
+  on top of English. The app follows the device language automatically, and **Settings →
+  Language** overrides it (including "Follow system"); Android 13+ also lists the app under
+  Settings → Apps → Language. Everything is translated: effect names and descriptions, every
+  control, the status page, speaker measurement, presets, errors, and the 41 engine
+  measurement entries with their settings descriptions.
+- The engine measurement page now reads its prose from resources keyed by the English effect
+  name, so the numbers stay in one generated file and translations cannot drift from them.
+
+Changed:
+
+- The four Status-page action buttons now share the row width, so "Engine measurements" is no
+  longer wider than the others (and translated labels wrap without mismatched heights).
+
 ## v2.3.0
 
 Changed:

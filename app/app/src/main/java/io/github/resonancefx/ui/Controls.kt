@@ -44,9 +44,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.resonancefx.App
+import io.github.resonancefx.R
 import io.github.resonancefx.engine.Applier
 import io.github.resonancefx.engine.Assets
 import io.github.resonancefx.model.FileControl
@@ -61,16 +63,18 @@ private const val EQ_RANGE_DB = 12f
 fun EqualizerControl(value: String, onChange: (String) -> Unit) {
     val gains = remember(value) { Applier.parseBands(value) }
     var presetsOpen by remember { mutableStateOf(false) }
-    val presetName = Tables.EQ_PRESETS.firstOrNull { (_, v) -> Applier.parseBands(v).contentEquals(gains) }?.first ?: "Custom"
+    val presetName = Tables.EQ_PRESETS.firstOrNull { (_, v) -> Applier.parseBands(v).contentEquals(gains) }?.first
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth()) {
-            Text("Preset", Modifier.weight(1f).padding(top = 12.dp), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.controls_preset), Modifier.weight(1f).padding(top = 12.dp), style = MaterialTheme.typography.bodyMedium)
             Column {
-                TextButton(onClick = { presetsOpen = true }) { Text(presetName) }
+                TextButton(onClick = { presetsOpen = true }) {
+                    Text(if (presetName != null) stringResource(presetName) else stringResource(R.string.controls_custom))
+                }
                 DropdownMenu(expanded = presetsOpen, onDismissRequest = { presetsOpen = false }) {
                     Tables.EQ_PRESETS.forEach { (name, bands) ->
-                        DropdownMenuItem(text = { Text(name) }, onClick = { onChange(bands); presetsOpen = false })
+                        DropdownMenuItem(text = { Text(stringResource(name)) }, onClick = { onChange(bands); presetsOpen = false })
                     }
                 }
             }
@@ -208,8 +212,8 @@ fun EqCurve(gains: FloatArray, bandsHz: List<Float>, onChange: (FloatArray) -> U
                 }
             }
             Text(
-                if (dragBand >= 0) "${hzLabel(bandsHz[dragBand])} Hz  %+.1f dB".format(gains[dragBand])
-                else "Drag a band to adjust it, double-tap to reset it",
+                if (dragBand >= 0) stringResource(R.string.controls_band_readout, hzLabel(bandsHz[dragBand]), gains[dragBand])
+                else stringResource(R.string.controls_band_drag_hint),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (dragBand >= 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -231,7 +235,7 @@ fun FileRow(control: FileControl, value: String, onChange: (String) -> Unit) {
         // Stage first, validate second: a failed import must not touch an existing valid asset
         // that happens to share the same (sanitized) name.
         val staged = runCatching { repo.stageAsset(control.kind, uri) }.getOrElse {
-            Toast.makeText(context, "Import failed: ${it.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.controls_import_failed, it.message ?: ""), Toast.LENGTH_LONG).show()
             return@rememberLauncherForActivityResult
         }
         val error = runCatching {
@@ -242,7 +246,7 @@ fun FileRow(control: FileControl, value: String, onChange: (String) -> Unit) {
         }.exceptionOrNull()
         if (error != null) {
             repo.discardAsset(staged)
-            Toast.makeText(context, "Not a valid file: ${error.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.controls_invalid_file, error.message ?: ""), Toast.LENGTH_LONG).show()
         } else {
             onChange(repo.commitAsset(control.kind, staged))
         }
@@ -251,12 +255,12 @@ fun FileRow(control: FileControl, value: String, onChange: (String) -> Unit) {
 
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.weight(1f)) {
-            Text(control.label, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(control.label), style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(value.ifBlank { "None" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(value.ifBlank { stringResource(R.string.controls_none) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(text = { Text("None") }, onClick = { onChange(""); menuOpen = false })
+                DropdownMenuItem(text = { Text(stringResource(R.string.controls_none)) }, onClick = { onChange(""); menuOpen = false })
                 files.forEach { f ->
                     DropdownMenuItem(
                         text = { Text(f) },
@@ -266,14 +270,14 @@ fun FileRow(control: FileControl, value: String, onChange: (String) -> Unit) {
                                 repo.deleteAsset(control.kind, f)
                                 if (value == f) onChange("")
                                 refresh++
-                            }) { Icon(Icons.Outlined.Delete, contentDescription = "Delete") }
+                            }) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.controls_delete)) }
                         },
                     )
                 }
             }
         }
         IconButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.padding(top = 20.dp)) {
-            Icon(Icons.Outlined.FileOpen, contentDescription = "Import ${control.kind.extensions.joinToString("/")}")
+            Icon(Icons.Outlined.FileOpen, contentDescription = stringResource(R.string.controls_import_file, control.kind.extensions.joinToString("/")))
         }
     }
 }

@@ -68,10 +68,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.resonancefx.App
+import io.github.resonancefx.R
 import io.github.resonancefx.data.Settings
 import io.github.resonancefx.driver.DriverStatus
 import io.github.resonancefx.driver.Params
@@ -110,7 +112,7 @@ fun EffectsScreen() {
         item {
             HeroCard(
                 on = settings.bool(Catalog.KEY_MASTER),
-                profile = repo.activeProfileName.takeIf { repo.perDeviceProfiles } ?: "All outputs",
+                profile = repo.activeProfileName.takeIf { repo.perDeviceProfiles } ?: stringResource(R.string.effects_all_outputs),
                 status = status,
                 onToggle = {
                     repo.set(Catalog.KEY_MASTER, it)
@@ -124,7 +126,7 @@ fun EffectsScreen() {
             // out in the sliver that remains, wrapping its label into a tall invisible column
             // and pushing every following card down (the "huge gap" below the filter row).
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = showAdvanced, onClick = { showAdvanced = !showAdvanced }, label = { Text("Advanced modules") })
+                FilterChip(selected = showAdvanced, onClick = { showAdvanced = !showAdvanced }, label = { Text(stringResource(R.string.effects_advanced_modules)) })
                 FilterChip(selected = false, onClick = {}, enabled = false, label = { Text(route.label, maxLines = 1) })
             }
         }
@@ -180,19 +182,21 @@ private fun HeroCard(on: Boolean, profile: String, status: DriverStatus?, onTogg
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("ResonanceFX", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                        Text("Profile · $profile", style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+                        Text(stringResource(R.string.effects_profile, profile), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
                     }
                     Switch(checked = on, onCheckedChange = onToggle)
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val (color, text) = when {
-                        status == null -> scheme.outline to "Checking engine…"
-                        !status.registered -> scheme.error to "Engine not loaded — install the module and reboot"
-                        !on -> scheme.outline to "Effects off"
+                        status == null -> scheme.outline to stringResource(R.string.effects_checking_engine)
+                        !status.registered -> scheme.error to stringResource(R.string.effects_engine_not_loaded)
+                        !on -> scheme.outline to stringResource(R.string.effects_off)
                         status.sessionError != null -> scheme.error to status.sessionError
-                        status.processing == true -> scheme.secondary to "Processing · ${status.sampleRate ?: "?"} Hz · ${status.channels ?: 2} ch"
-                        else -> scheme.primary to status.headline
+                        status.processing == true -> scheme.secondary to stringResource(
+                            R.string.effects_processing, (status.sampleRate ?: "?").toString(), status.channels ?: 2,
+                        )
+                        else -> scheme.primary to stringResource(status.headlineRes)
                     }
                     Box(
                         Modifier
@@ -230,8 +234,13 @@ private fun SectionCard(section: Section, settings: Settings, onChange: (String,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(section.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                    Text(section.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(section.title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                    // Only the equalizer summary uses an argument (its preset count); extra
+                    // arguments are ignored by the others.
+                    Text(
+                        stringResource(section.summary, io.github.resonancefx.model.Tables.EQ_PRESETS.size),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 if (section.controls.isNotEmpty()) {
                     Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.rotate(rotation))
@@ -263,7 +272,7 @@ private fun SectionCard(section: Section, settings: Settings, onChange: (String,
 private fun ControlRow(control: Control, settings: Settings, onChange: (String, Any) -> Unit) {
     when (control) {
         is Toggle -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text(control.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(control.label), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             Switch(checked = settings.bool(control.key), onCheckedChange = { onChange(control.key, it) })
         }
         is SliderControl -> SliderRow(control, settings.int(control.key)) { onChange(control.key, it) }
@@ -301,12 +310,13 @@ private fun ControlRow(control: Control, settings: Settings, onChange: (String, 
 
 @Composable
 private fun SliderRow(control: SliderControl, value: Int, onChange: (Int) -> Unit) {
+    val context = LocalContext.current
     // Local state keeps dragging smooth; the engine gets every step, storage only the final one.
     var local by remember(value) { mutableFloatStateOf(value.toFloat()) }
     Column {
         Row {
-            Text(control.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(control.format(local.toInt()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(control.label), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Text(control.format(context, local.toInt()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
         Slider(
             value = local,
@@ -326,10 +336,10 @@ private fun ChoiceRow(control: Choice, value: Int, onChange: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = open, onExpandedChange = { open = it }) {
         OutlinedTextField(
-            value = control.options.getOrElse(value) { "" },
+            value = control.options.getOrNull(value)?.let { stringResource(it) } ?: "",
             onValueChange = {},
             readOnly = true,
-            label = { Text(control.label) },
+            label = { Text(stringResource(control.label)) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) },
             modifier = Modifier
                 .fillMaxWidth()
@@ -337,7 +347,7 @@ private fun ChoiceRow(control: Choice, value: Int, onChange: (Int) -> Unit) {
         )
         ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             control.options.forEachIndexed { i, option ->
-                DropdownMenuItem(text = { Text(option) }, onClick = { onChange(i); open = false })
+                DropdownMenuItem(text = { Text(stringResource(option)) }, onClick = { onChange(i); open = false })
             }
         }
     }

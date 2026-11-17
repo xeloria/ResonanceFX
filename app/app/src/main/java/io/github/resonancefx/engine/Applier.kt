@@ -3,6 +3,9 @@
 
 package io.github.resonancefx.engine
 
+import android.content.Context
+import io.github.resonancefx.R
+
 import android.util.Log
 import io.github.resonancefx.data.Settings
 import io.github.resonancefx.driver.Codec
@@ -25,6 +28,7 @@ import java.io.File
 
 /** Pushes [Settings] into an engine instance, either fully or only the keys that changed. */
 class Applier(
+    private val context: Context,
     private val resolveAsset: (FileControl.Kind, String) -> File?,
     private val autoEq: () -> AutoEqDatabase?,
 ) {
@@ -32,6 +36,9 @@ class Applier(
     /** Last problem loading a user file, surfaced on the status screen. */
     @Volatile var lastAssetError: String? = null
         private set
+
+    /** Set while the last error came from AutoEQ, so a working profile can clear it again. */
+    @Volatile private var autoEqFailed = false
 
     fun applyAll(fx: EngineEffect, settings: Settings) {
         // Without this the engine never timestamps buffers and always reports "not processing".
@@ -95,13 +102,19 @@ class Applier(
         val id = settings.string(Catalog.KEY_AUTOEQ_PROFILE)
         val features = fx.getInt(Params.GET_FEATURES) ?: 0
         if (features and Params.FEATURE_PARAMETRIC_EQ == 0) {
-            if (id.isNotBlank()) lastAssetError = "AutoEQ needs the ResonanceFX engine v1.0.4 or newer — update the module"
+            if (id.isNotBlank()) {
+                lastAssetError = context.getString(R.string.error_autoeq_engine_old)
+                autoEqFailed = true
+            }
             return
         }
         val profile = id.takeIf { it.isNotBlank() }?.let { autoEq()?.find(it) }
         if (profile == null) {
             fx.set(Params.PARAMETRIC_EQ_FILTERS, Codec.parametricEq(0f, emptyList()))
-            if (id.isNotBlank()) lastAssetError = "AutoEQ: profile \"$id\" not found"
+            if (id.isNotBlank()) {
+                lastAssetError = context.getString(R.string.error_autoeq_profile_missing, id)
+                autoEqFailed = true
+            }
             return
         }
         val (preamp, filters) = profile.scaled(settings.int(Catalog.KEY_AUTOEQ_STRENGTH) / 100f)
@@ -110,7 +123,10 @@ class Applier(
             Codec.parametricEq(preamp, filters.map { floatArrayOf(it.type.toFloat(), it.frequency, it.gainDb, it.q) }),
         )
         // A profile that now applies supersedes any earlier AutoEQ problem.
-        if (lastAssetError?.startsWith("AutoEQ") == true) lastAssetError = null
+        if (autoEqFailed) {
+            lastAssetError = null
+            autoEqFailed = false
+        }
     }
 
     private fun applyFile(fx: EngineEffect, control: FileControl, name: String) {
@@ -135,7 +151,9 @@ class Applier(
                     // EFFECT_CMD_CONFIGURE the engine still reports its 48 kHz default, and a
                     // kernel resampled against that plays frequency-shifted on 44.1/96 kHz output.
                     val rate = fx.getInt(Params.GET_SAMPLING_RATE)?.takeIf { it in 8000..384000 } ?: run {
-                        lastAssetError = "${control.label}: waiting for the output sample rate"
+                        lastAssetError = context.getString(
+                            R.string.error_waiting_sample_rate, context.getString(control.label),
+                        )
                         return
                     }
                     val kernel = Assets.resample(Assets.parseWav(file.readBytes()), rate)
@@ -145,7 +163,7 @@ class Applier(
             }
             lastAssetError = null
         } catch (e: Exception) {
-            lastAssetError = "${control.label}: ${e.message}"
+            lastAssetError = context.getString(R.string.error_control, context.getString(control.label), e.message ?: "")
             Log.w(TAG, "Failed to apply $name", e)
         }
     }

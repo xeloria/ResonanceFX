@@ -3,6 +3,7 @@
 
 package io.github.resonancefx.model
 
+import io.github.resonancefx.R
 import io.github.resonancefx.data.Settings
 import io.github.resonancefx.driver.Codec
 import java.util.Locale
@@ -13,7 +14,10 @@ object Composite {
     /** One user parametric EQ band; [type] as in [BandsControl]. */
     data class Band(val type: Int, val frequency: Float, val gainDb: Float, val q: Float)
 
-    val BAND_TYPES = listOf("Peak", "Low shelf", "High shelf", "Low-pass", "High-pass", "Band-pass", "Notch")
+    val BAND_TYPES = listOf(
+        R.string.band_peak, R.string.band_low_shelf, R.string.band_high_shelf, R.string.band_low_pass,
+        R.string.band_high_pass, R.string.band_band_pass, R.string.band_notch,
+    )
     const val MAX_BANDS = 32
 
     fun parseBands(value: String): List<Band> = value.split(';').mapNotNull { entry ->

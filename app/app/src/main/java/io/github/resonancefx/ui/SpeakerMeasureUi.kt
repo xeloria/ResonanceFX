@@ -55,11 +55,14 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import io.github.resonancefx.R
 import io.github.resonancefx.measure.CorrectionFitter
 import io.github.resonancefx.measure.MeasureException
 import io.github.resonancefx.measure.SpeakerMeasurer
@@ -89,13 +92,13 @@ fun MeasureRow(
     }
     val reference = others.firstOrNull { it.key == match }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-        Text("Your measurement", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.measure_your_speaker), style = MaterialTheme.typography.titleSmall)
         if (measurement == null) {
             Text(
-                "Measure your speaker with the phone's microphone and get a correction made for it.",
+                stringResource(R.string.measure_intro),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = { measuring = true }, modifier = Modifier.fillMaxWidth()) { Text("Measure speaker") }
+            Button(onClick = { measuring = true }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.measure_start)) }
         } else {
             MeasurementSummary(measurement, reference)
             if (others.isNotEmpty()) {
@@ -110,15 +113,15 @@ fun MeasureRow(
             }
             if (!usingMeasured) {
                 Text(
-                    "Pick \"Measured\" above to hear it.",
+                    stringResource(R.string.measure_pick_measured_above),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { measuring = true }) { Text("Measure again") }
-                if (!usingMeasured) TextButton(onClick = onUse) { Text("Use it") }
+                OutlinedButton(onClick = { measuring = true }) { Text(stringResource(R.string.measure_again)) }
+                if (!usingMeasured) TextButton(onClick = onUse) { Text(stringResource(R.string.measure_use_it)) }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onDelete) { Text("Delete") }
+                TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete)) }
             }
         }
     }
@@ -133,20 +136,20 @@ fun MeasureRow(
 @Composable
 private fun SoundLike(others: List<Repository.MeasuredSpeaker>, match: String, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val current = others.firstOrNull { it.key == match }?.label ?: "Natural (neutral speaker target)"
+    val current = others.firstOrNull { it.key == match }?.label ?: stringResource(R.string.measure_natural_target)
     Column {
-        Text("Sound like", style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.measure_sound_like), style = MaterialTheme.typography.bodyMedium)
         Box {
             OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) { Text(current) }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                DropdownMenuItem(text = { Text("Natural (neutral speaker target)") }, onClick = { open = false; onPick("") })
+                DropdownMenuItem(text = { Text(stringResource(R.string.measure_natural_target)) }, onClick = { open = false; onPick("") })
                 others.forEach { o ->
                     DropdownMenuItem(text = { Text(o.label) }, onClick = { open = false; onPick(o.key) })
                 }
             }
         }
         Text(
-            "Makes this speaker sound like another one you measured, within the range both can play.",
+            stringResource(R.string.measure_sound_like_hint),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -167,13 +170,14 @@ private fun MeasurementSummary(m: Composite.Measurement, reference: Repository.M
             m.lowHz, m.highHz, Modifier.fillMaxWidth().height(150.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Legend(scheme.outline, "Measured")
-            Legend(scheme.primary, "Corrected")
+            Legend(scheme.outline, stringResource(R.string.measure_legend_measured))
+            Legend(scheme.primary, stringResource(R.string.measure_legend_corrected))
             reference?.let { Legend(scheme.tertiary, it.label) }
         }
+        val filters = pluralStringResource(R.plurals.measure_filters, m.bands.size, m.bands.size)
         Text(
-            "Corrects ${roundHz(m.lowHz)} Hz – ${roundHz(m.highHz)} Hz with ${m.bands.size} filters" +
-                if (m.preampDb < 0) ", ${"%.1f".format(m.preampDb)} dB headroom" else "",
+            stringResource(R.string.measure_corrects, roundHz(m.lowHz), roundHz(m.highHz), filters) +
+                if (m.preampDb < 0) stringResource(R.string.measure_headroom, io.github.resonancefx.model.Catalog.oneDecimal(m.preampDb)) else "",
             style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant,
         )
         m.distortion?.let { DistortionSummary(it) }
@@ -183,19 +187,23 @@ private fun MeasurementSummary(m: Composite.Measurement, reference: Repository.M
 /** Where each band started to distort, from the optional distortion test. */
 @Composable
 private fun DistortionSummary(d: Composite.Distortion) {
-    val names = listOf("Deep bass (below 125 Hz)", "Bass (125-250 Hz)", "Low mids (250-500 Hz)", "Mids (500 Hz-1 kHz)", "Upper mids (1-4 kHz)")
+    val names = listOf(
+        R.string.measure_band_deep_bass, R.string.measure_band_bass, R.string.measure_band_low_mids,
+        R.string.measure_band_mids, R.string.measure_band_upper_mids,
+    )
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text("Distortion test", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.measure_distortion_test), style = MaterialTheme.typography.titleSmall)
         d.cleanUpToDb.forEachIndexed { i, level ->
+            val band = if (i < names.size) stringResource(names[i]) else stringResource(R.string.measure_band_number, i + 1)
             val text = when {
-                level == null -> "clean at every level tested"
-                level < SpeakerMeasurer.DISTORTION_LEVELS.first() -> "distorts even at the quietest level tested"
-                else -> "clean up to ${"%.0f".format(level)} dB"
+                level == null -> stringResource(R.string.measure_distortion_clean)
+                level < SpeakerMeasurer.DISTORTION_LEVELS.first() -> stringResource(R.string.measure_distortion_quiet)
+                else -> stringResource(R.string.measure_distortion_up_to, "%.0f".format(java.util.Locale.ROOT, level))
             }
-            Text("${names.getOrElse(i) { "Band ${i + 1}" }}: $text", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.measure_band_line, band, text), style = MaterialTheme.typography.bodySmall)
         }
         Text(
-            "Pick \"Measured\" in Speaker protection to hold each band below where it distorts.",
+            stringResource(R.string.measure_distortion_hint),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -267,16 +275,16 @@ private fun MeasureDialog(onDismiss: () -> Unit, onSave: (Composite.Measurement)
             state = try {
                 MeasureState.Done(measurer.measure({ progress = it }, distortion = testDistortion))
             } catch (e: MeasureException) {
-                MeasureState.Failed(e.message ?: "The measurement failed.")
+                MeasureState.Failed(e.message ?: context.getString(R.string.measure_failed))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                MeasureState.Failed("The measurement failed: ${e.message}")
+                MeasureState.Failed(context.getString(R.string.measure_failed_detail, e.message ?: ""))
             }
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) start() else state = MeasureState.Failed("Measuring needs the microphone. Allow it and try again.")
+        if (granted) start() else state = MeasureState.Failed(context.getString(R.string.measure_permission))
     }
     fun requestStart() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) start()
@@ -293,61 +301,58 @@ private fun MeasureDialog(onDismiss: () -> Unit, onSave: (Composite.Measurement)
                 Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Measure speaker", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.measure_start), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium)
                 when (val s = state) {
                     MeasureState.Intro -> {
                         val volume = (measurer.volume * 100).roundToInt()
                         Steps(
-                            "Turn off other sound effects first (Dolby Atmos, Adapt Sound, other equalizer apps).",
-                            "Set media volume to a normal listening level. It's at $volume% now" +
-                                if (volume < 30) ", which is probably too low." else ".",
-                            "Hold the phone where your ears would be, facing the speaker. For the phone's own " +
-                                "speakers, hold it as you normally do; that result is approximate, because the " +
-                                "microphone sits next to one of them.",
-                            "Keep the room quiet. You'll hear two sweeps, about 12 seconds in all.",
+                            stringResource(R.string.measure_step_1),
+                            stringResource(
+                                R.string.measure_step_2, volume,
+                                stringResource(if (volume < 30) R.string.measure_step_2_low else R.string.measure_step_2_ok),
+                            ),
+                            stringResource(R.string.measure_step_3),
+                            stringResource(R.string.measure_step_4),
                         )
                         Text(
-                            "Effects pause while measuring. Phone microphones aren't calibrated, so the correction " +
-                                "stays gentle: at most +6 dB, and only where your speaker can play. The recording " +
-                                "never leaves the phone.",
+                            stringResource(R.string.measure_disclaimer),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = testDistortion, onCheckedChange = { testDistortion = it })
                             Column {
-                                Text("Also find where it starts to distort", style = MaterialTheme.typography.bodyMedium)
+                                Text(stringResource(R.string.measure_distortion_option), style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    "Five more sweeps, each louder, up to full scale (about 30 seconds). It stops as " +
-                                        "soon as the speaker distorts. Use it at the volume you listen at.",
+                                    stringResource(R.string.measure_distortion_option_hint),
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = ::close) { Text("Cancel") }
-                            Button(onClick = ::requestStart) { Text("Start") }
+                            TextButton(onClick = ::close) { Text(stringResource(R.string.action_cancel)) }
+                            Button(onClick = ::requestStart) { Text(stringResource(R.string.action_start)) }
                         }
                     }
                     is MeasureState.Running -> {
-                        Text("Measuring… keep quiet", style = MaterialTheme.typography.bodyLarge)
+                        Text(stringResource(R.string.measure_running), style = MaterialTheme.typography.bodyLarge)
                         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = ::close) { Text("Cancel") }
+                            TextButton(onClick = ::close) { Text(stringResource(R.string.action_cancel)) }
                         }
                     }
                     is MeasureState.Done -> {
                         MeasurementSummary(s.measurement)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = ::requestStart) { Text("Retry") }
-                            TextButton(onClick = ::close) { Text("Discard") }
-                            Button(onClick = { onSave(s.measurement) }) { Text("Save and use") }
+                            TextButton(onClick = ::requestStart) { Text(stringResource(R.string.measure_retry)) }
+                            TextButton(onClick = ::close) { Text(stringResource(R.string.measure_discard)) }
+                            Button(onClick = { onSave(s.measurement) }) { Text(stringResource(R.string.measure_save_and_use)) }
                         }
                     }
                     is MeasureState.Failed -> {
                         Text(s.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = ::close) { Text("Close") }
-                            Button(onClick = ::requestStart) { Text("Try again") }
+                            TextButton(onClick = ::close) { Text(stringResource(R.string.action_close)) }
+                            Button(onClick = ::requestStart) { Text(stringResource(R.string.measure_try_again)) }
                         }
                     }
                 }

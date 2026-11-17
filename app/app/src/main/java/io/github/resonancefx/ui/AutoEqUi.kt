@@ -51,6 +51,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,6 +60,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.resonancefx.App
+import io.github.resonancefx.R
 import io.github.resonancefx.autoeq.AutoEqDatabase
 import io.github.resonancefx.autoeq.AutoEqProfile
 import io.github.resonancefx.autoeq.Response
@@ -88,7 +91,7 @@ fun AutoEqRow(value: String, strength: Int, onChange: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (unsupported) {
             Text(
-                "The installed engine predates AutoEQ. Flash the latest ResonanceFX module and reboot.",
+                stringResource(R.string.autoeq_engine_old),
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -97,33 +100,41 @@ fun AutoEqRow(value: String, strength: Int, onChange: (String) -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    profile?.name ?: if (value.isBlank()) "No headphone selected" else "Unknown profile",
+                    profile?.name ?: if (value.isBlank()) stringResource(R.string.autoeq_none_selected) else stringResource(R.string.autoeq_unknown_profile),
                     style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
                 profile?.let {
-                    Text("${it.form} · measured by ${it.sourceLabel}", style = MaterialTheme.typography.bodySmall,
+                    Text(stringResource(R.string.autoeq_profile_credit, it.form, it.sourceLabel), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (value.isNotBlank()) {
-                IconButton(onClick = { onChange("") }) { Icon(Icons.Outlined.Close, contentDescription = "Clear") }
+                IconButton(onClick = { onChange("") }) { Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.autoeq_clear)) }
             }
         }
         profile?.let { p ->
             val (preamp, filters) = p.scaled(strength / 100f)
             ResponseCurve(Response.curve(preamp, filters), Modifier.fillMaxWidth().height(120.dp))
             Text(
-                "${filters.size} filters · preamp %.1f dB".format(preamp),
+                stringResource(
+                    R.string.autoeq_filters_preamp,
+                    pluralStringResource(R.plurals.autoeq_filters, filters.size, filters.size),
+                    io.github.resonancefx.model.Catalog.oneDecimal(preamp),
+                ),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         FilledTonalButton(onClick = { picking = true }, enabled = db != null, modifier = Modifier.fillMaxWidth()) {
             if (db == null) CircularProgressIndicator(Modifier.width(18.dp).height(18.dp), strokeWidth = 2.dp)
-            else Text(if (profile == null) "Choose headphone" else "Change headphone")
+            else Text(stringResource(if (profile == null) R.string.autoeq_choose else R.string.autoeq_change))
         }
         db?.let {
             Text(
-                "${it.modelCount} models · ${it.profiles.size} measurements · AutoEq project",
+                stringResource(
+                    R.string.autoeq_database_summary,
+                    pluralStringResource(R.plurals.autoeq_models, it.modelCount, it.modelCount),
+                    pluralStringResource(R.plurals.autoeq_measurements, it.profiles.size, it.profiles.size),
+                ),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -148,11 +159,11 @@ private fun AutoEqPicker(db: AutoEqDatabase, selected: String, onDismiss: () -> 
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             Column {
                 Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back)) }
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = { Text("Search ${db.modelCount} headphones") },
+                        placeholder = { Text(pluralStringResource(R.plurals.autoeq_search, db.modelCount, db.modelCount)) },
                         leadingIcon = { Icon(Icons.Outlined.Search, null) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
@@ -160,13 +171,13 @@ private fun AutoEqPicker(db: AutoEqDatabase, selected: String, onDismiss: () -> 
                 }
                 LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
                     if (query.isBlank() && suggestions.isNotEmpty()) {
-                        item { SectionLabel("Matches for ${route.label}") }
+                        item { SectionLabel(stringResource(R.string.autoeq_matches_for, route.label)) }
                         items(suggestions, key = { "s:" + it.id }) { ProfileItem(it, it.id == selected, onPick) }
                         item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-                        item { SectionLabel("All headphones") }
+                        item { SectionLabel(stringResource(R.string.autoeq_all_headphones)) }
                     }
                     if (results.isEmpty()) {
-                        item { Text("No match. Try fewer words, e.g. just the model number.", Modifier.padding(24.dp)) }
+                        item { Text(stringResource(R.string.autoeq_no_match), Modifier.padding(24.dp)) }
                     }
                     items(results, key = { it.id }) { ProfileItem(it, it.id == selected, onPick) }
                 }
@@ -186,7 +197,7 @@ private fun ProfileItem(p: AutoEqProfile, selected: Boolean, onPick: (String) ->
     ListItem(
         headlineContent = { Text(p.name, fontWeight = if (selected) FontWeight.SemiBold else null) },
         supportingContent = { Text("${p.form} · ${p.sourceLabel}") },
-        trailingContent = { if (selected) AssistChip(onClick = {}, label = { Text("Active") }) },
+        trailingContent = { if (selected) AssistChip(onClick = {}, label = { Text(stringResource(R.string.autoeq_active)) }) },
         modifier = Modifier.clickable { onPick(p.id) },
     )
 }

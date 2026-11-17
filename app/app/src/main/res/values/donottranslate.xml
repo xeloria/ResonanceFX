@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Names of languages, always shown in their own language. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="language_name_en" translatable="false">English</string>
+    <string name="language_name_ja" translatable="false">日本語</string>
+    <string name="language_name_ru" translatable="false">Русский</string>
+    <string name="language_name_zh" translatable="false">中文（简体）</string>
+    <string name="language_name_es" translatable="false">Español</string>
+    <string name="language_name_ko" translatable="false">한국어</string>
+    <string name="language_name_fr" translatable="false">Français</string>
+</resources>

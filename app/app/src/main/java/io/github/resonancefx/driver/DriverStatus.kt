@@ -4,6 +4,7 @@
 package io.github.resonancefx.driver
 
 import android.os.Build
+import io.github.resonancefx.R
 import io.github.resonancefx.service.EngineService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,14 +31,14 @@ data class DriverStatus(
     val sessionError: String?,
     val assetError: String?,
 ) {
-    /** One-line verdict. */
-    val headline: String
+    /** One-line verdict, as a string resource. */
+    val headlineRes: Int
         get() = when {
-            !registered -> "Engine not loaded"
-            !attached -> "Engine loaded · not attached"
-            configured == false -> "Engine attached · stream rejected"
-            processing == true -> "Processing audio"
-            else -> "Ready · waiting for audio"
+            !registered -> R.string.headline_not_loaded
+            !attached -> R.string.headline_not_attached
+            configured == false -> R.string.headline_stream_rejected
+            processing == true -> R.string.headline_processing
+            else -> R.string.headline_ready
         }
 
     val healthy get() = registered && attached && configured != false && sessionError == null

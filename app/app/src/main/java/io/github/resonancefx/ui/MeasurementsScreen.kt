@@ -36,11 +36,14 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import io.github.resonancefx.R
 import io.github.resonancefx.model.Catalog
+import io.github.resonancefx.model.MeasurementStrings
 import io.github.resonancefx.model.Measurements
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -56,7 +59,7 @@ fun MeasurementsDialog(onDismiss: () -> Unit) {
         withContext(Dispatchers.IO) {
             runCatching { Measurements.parse(context.assets.open("measurements.json").bufferedReader().readText()) }
                 .onSuccess { data = it }
-                .onFailure { error = "Measurements unavailable: ${it.message}" }
+                .onFailure { error = context.getString(R.string.measurements_unavailable, it.message ?: "") }
         }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -65,24 +68,23 @@ fun MeasurementsDialog(onDismiss: () -> Unit) {
                 item {
                     Row {
                         Text(
-                            "Engine measurements", Modifier.weight(1f),
+                            stringResource(R.string.title_engine_measurements), Modifier.weight(1f),
                             style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium,
                         )
-                        TextButton(onClick = onDismiss) { Text("Close") }
+                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
                     }
                     val d = data
                     Text(
-                        "Measured, not claimed: what every effect actually does to the sound, measured on the " +
-                            "engine itself" + (d?.let { " (version ${it.engine})" } ?: "") + ". The same numbers are " +
-                            "published with every release.",
+                        stringResource(
+                            R.string.measurements_intro,
+                            d?.let { stringResource(R.string.measurements_version, it.engine) } ?: "",
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    d?.method?.takeIf { it.isNotBlank() }?.let {
-                        Text(
-                            it, Modifier.padding(top = 4.dp),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        stringResource(R.string.measurement_method), Modifier.padding(top = 4.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
                 val d = data ?: return@LazyColumn
@@ -96,39 +98,42 @@ fun MeasurementsDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun EffectCard(e: Measurements.Effect, sectionTitle: String?, freqs: List<Float>) {
+private fun EffectCard(e: Measurements.Effect, sectionTitle: Int?, freqs: List<Float>) {
     val scheme = MaterialTheme.colorScheme
+    val name = MeasurementStrings.NAMES[e.name]?.let { stringResource(it) } ?: e.name
+    val settings = MeasurementStrings.SETTINGS[e.name]?.let { stringResource(it) } ?: e.settings
+    val section = sectionTitle?.let { stringResource(it) }
     Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(e.name, style = MaterialTheme.typography.titleMedium)
-            if (sectionTitle != null && !e.name.startsWith(sectionTitle)) {
-                Text(sectionTitle, style = MaterialTheme.typography.labelMedium, color = scheme.primary)
+            Text(name, style = MaterialTheme.typography.titleMedium)
+            if (section != null && section != name) {
+                Text(section, style = MaterialTheme.typography.labelMedium, color = scheme.primary)
             }
-            Text(e.settings, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            Text(settings, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             ResponsePlot(freqs, listOfNotNull(e.response to scheme.primary, e.crosstalk?.let { it to scheme.tertiary }),
                 Modifier.fillMaxWidth().height(120.dp))
             if (e.crosstalk != null) {
-                Text("Purple: the same channel. Second curve: what leaks into the other channel.",
+                Text(stringResource(R.string.measurements_crosstalk_legend),
                     style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
             val facts = buildList {
-                e.noiseDb?.let { add("Loudness change (pink noise): ${signed(it)} dB") }
+                e.noiseDb?.let { add(stringResource(R.string.measurements_noise, signed(it))) }
                 if (e.thd100 != null && e.thd1k != null) {
-                    add("Distortion at -12 dBFS: ${pct(e.thd100)} at 100 Hz, ${pct(e.thd1k)} at 1 kHz")
+                    add(stringResource(R.string.measurements_thd, pct(e.thd100), pct(e.thd1k)))
                 }
                 if (e.gainLoud != null && e.gainQuiet != null) {
-                    add("Loud tone (-3 dBFS): ${signed(e.gainLoud)} dB · quiet tone (-40 dBFS): ${signed(e.gainQuiet)} dB")
+                    add(stringResource(R.string.measurements_dynamics, signed(e.gainLoud), signed(e.gainQuiet)))
                 }
-                e.widthDb?.let { add("Stereo width (side/mid): ${signed(it)} dB") }
-                e.tailDb?.let { add("Tail 0.3-1.3 s after a click: ${"%.0f".format(it)} dB") }
+                e.widthDb?.let { add(stringResource(R.string.measurements_width, signed(it))) }
+                e.tailDb?.let { add(stringResource(R.string.measurements_tail, String.format(java.util.Locale.ROOT, "%.0f", it))) }
             }
             facts.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }
 
-private fun signed(v: Float) = "%+.1f".format(v)
-private fun pct(v: Float) = if (v < 0.01f) "<0.01 %" else "%.2f %%".format(v)
+private fun signed(v: Float) = String.format(java.util.Locale.ROOT, "%+.1f", v)
+private fun pct(v: Float) = if (v < 0.01f) "<0.01 %" else String.format(java.util.Locale.ROOT, "%.2f %%", v)
 
 /** Gain curves (dB) on a 20 Hz-20 kHz log axis, +-18 dB. */
 @Composable

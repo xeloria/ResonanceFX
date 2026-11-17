@@ -32,7 +32,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.github.resonancefx.R
 import io.github.resonancefx.autoeq.PeqFilter
 import io.github.resonancefx.autoeq.Response
 import io.github.resonancefx.model.Composite
@@ -47,7 +49,7 @@ fun GraphicEqRow(layout: Int, value: String, onChange: (String) -> Unit) {
     val gains = remember(value, layout) { Composite.parseGains(value, bandsHz.size) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         EqCurve(gains, bandsHz) { onChange(Composite.formatGains(it)) }
-        TextButton(onClick = { onChange("") }, modifier = Modifier.align(Alignment.End)) { Text("Flatten") }
+        TextButton(onClick = { onChange("") }, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.eq_flatten)) }
     }
 }
 
@@ -73,7 +75,7 @@ fun BandsEditor(value: String, preampDb: Int, onChange: (String) -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Outlined.Add, contentDescription = null)
-                Text("Add band")
+                Text(stringResource(R.string.eq_add_band))
             }
         }
     }
@@ -90,28 +92,31 @@ private fun BandCard(index: Int, band: Composite.Band, onChange: (Composite.Band
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Band ${index + 1}", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.eq_band_number, index + 1), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 Column {
-                    TextButton(onClick = { typeOpen = true }) { Text(Composite.BAND_TYPES[band.type]) }
+                    TextButton(onClick = { typeOpen = true }) { Text(stringResource(Composite.BAND_TYPES[band.type])) }
                     DropdownMenu(expanded = typeOpen, onDismissRequest = { typeOpen = false }) {
                         Composite.BAND_TYPES.forEachIndexed { t, name ->
-                            DropdownMenuItem(text = { Text(name) }, onClick = { onChange(band.copy(type = t)); typeOpen = false })
+                            DropdownMenuItem(text = { Text(stringResource(name)) }, onClick = { onChange(band.copy(type = t)); typeOpen = false })
                         }
                     }
                 }
-                IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, contentDescription = "Remove band") }
+                IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.eq_remove_band)) }
             }
             // Frequency on a log scale: slider 0..1 spans 20 Hz..20 kHz.
             BandSlider(
-                "Frequency", "${hzLabel(band.frequency.roundToInt().toFloat())} Hz",
+                stringResource(R.string.label_frequency), stringResource(R.string.value_hz_text, hzLabel(band.frequency.roundToInt().toFloat())),
                 (ln(band.frequency / 20f) / ln(1000f)), 0f..1f,
             ) { onChange(band.copy(frequency = (20f * exp(it * ln(1000f))).roundToInt().toFloat())) }
             if (hasGain) {
-                BandSlider("Gain", "%+.1f dB".format(band.gainDb), band.gainDb, -24f..24f) {
+                BandSlider(stringResource(R.string.label_gain), stringResource(R.string.value_db_signed_float, band.gainDb), band.gainDb, -24f..24f) {
                     onChange(band.copy(gainDb = (it * 2).roundToInt() / 2f))
                 }
             }
-            BandSlider(if (band.type == 1 || band.type == 2) "Slope (Q)" else "Width (Q)", "%.2f".format(band.q), band.q, 0.1f..10f) {
+            BandSlider(
+                stringResource(if (band.type == 1 || band.type == 2) R.string.eq_slope_q else R.string.eq_width_q),
+                String.format(java.util.Locale.ROOT, "%.2f", band.q), band.q, 0.1f..10f,
+            ) {
                 onChange(band.copy(q = (it * 20).roundToInt() / 20f))
             }
         }

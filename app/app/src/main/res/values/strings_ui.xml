@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Screens, dialogs, toasts and accessibility labels. -->
+<resources>
+
+    <!-- Navigation and screen titles -->
+    <string name="nav_effects">Effects</string>
+    <string name="nav_presets">Presets</string>
+    <string name="nav_status">Status</string>
+    <string name="nav_settings">Settings</string>
+    <string name="title_engine_status">Engine status</string>
+    <string name="title_engine_measurements">Engine measurements</string>
+
+    <!-- Effects screen -->
+    <string name="effects_advanced_modules">Advanced modules</string>
+    <string name="effects_all_outputs">All outputs</string>
+    <string name="effects_profile">Profile · %1$s</string>
+    <string name="effects_checking_engine">Checking engine…</string>
+    <string name="effects_engine_not_loaded">Engine not loaded — install the module and reboot</string>
+    <string name="effects_off">Effects off</string>
+    <string name="effects_processing">Processing · %1$s Hz · %2$d ch</string>
+
+    <!-- Driver headline -->
+    <string name="headline_not_loaded">Engine not loaded</string>
+    <string name="headline_not_attached">Engine loaded · not attached</string>
+    <string name="headline_stream_rejected">Engine attached · stream rejected</string>
+    <string name="headline_processing">Processing audio</string>
+    <string name="headline_ready">Ready · waiting for audio</string>
+
+    <!-- Status screen -->
+    <string name="status_querying">Querying…</string>
+    <string name="status_check_registered">Engine registered with Android</string>
+    <string name="status_check_attached">Attached to audio</string>
+    <string name="status_check_turn_on">Turn effects on</string>
+    <string name="status_check_stream">Audio stream accepted</string>
+    <string name="status_check_no_stream">No stream yet</string>
+    <string name="status_check_processing">Processing audio</string>
+    <string name="status_check_play">Play something</string>
+    <string name="status_check_session">Session</string>
+    <string name="status_check_imported_file">Imported file</string>
+    <string name="status_fact_driver">Driver</string>
+    <string name="status_fact_architecture">Architecture</string>
+    <string name="status_fact_factory">Effect factory</string>
+    <string name="status_fact_not_detected">module not detected</string>
+    <string name="status_fact_sample_rate">Sample rate</string>
+    <string name="status_fact_channels">Channels</string>
+    <string name="status_fact_convolver">Convolver</string>
+    <string name="status_fact_kernel_loaded">Impulse response loaded</string>
+    <string name="status_fact_no_kernel">No impulse response</string>
+    <string name="status_copy_report">Copy report</string>
+    <string name="status_report_copied">Report copied</string>
+    <string name="status_reapply">Re-apply</string>
+    <string name="status_play_test_tone">Play test tone</string>
+    <string name="status_engine_measurements">Engine measurements</string>
+    <string name="status_test_tone_hint">Plays a 3-second chord. With effects on, &quot;Processing audio&quot; should get a check mark while it plays.</string>
+    <string name="status_troubleshooting_title">The engine isn\'t loaded</string>
+    <string name="status_troubleshooting_1">1. Flash ResonanceFX-&lt;version&gt;.zip in Magisk, KernelSU or APatch and reboot.</string>
+    <string name="status_troubleshooting_aidl">This ROM uses the AIDL audio-effect HAL. A module build without the AIDL engine cannot register here - check the module description after the next boot.</string>
+    <string name="status_troubleshooting_2">2. In your root manager, tap the module\'s Action button: it re-patches, re-mounts and restarts audio, then reports what it found.</string>
+    <string name="status_troubleshooting_3">3. Remove other audio-effect modules that install the same engine — the installer disables them, but leftovers in /vendor can conflict.</string>
+    <string name="status_troubleshooting_4">4. Still failing? Copy the report above together with /data/adb/resonancefx/logs.</string>
+
+    <!-- Presets -->
+    <string name="presets_intro">Presets capture every effect setting. Applying one replaces the profile for %1$s.</string>
+    <string name="presets_save_current">Save current</string>
+    <string name="presets_import">Import</string>
+    <string name="presets_empty">No presets yet.</string>
+    <string name="presets_imported">Imported %1$s</string>
+    <string name="presets_import_failed">Not a ResonanceFX preset: %1$s</string>
+    <string name="presets_export_failed">Export failed: %1$s</string>
+    <string name="presets_applied">Applied %1$s</string>
+    <string name="presets_save_title">Save preset</string>
+    <string name="presets_name">Name</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_export">Export</string>
+
+    <!-- Settings -->
+    <string name="settings_attach_to">Attach to</string>
+    <string name="settings_mode_global_title">All audio (recommended)</string>
+    <string name="settings_mode_global_body">Processes the global output mix. Works with every app.</string>
+    <string name="settings_mode_per_app_title">Per-app sessions</string>
+    <string name="settings_mode_per_app_body">Only players that announce their audio session (most music apps).</string>
+    <string name="settings_per_device">Per-device profiles</string>
+    <string name="settings_per_device_body">Separate settings for speaker, wired, each Bluetooth device and USB DAC.</string>
+    <string name="settings_start_on_boot">Start on boot</string>
+    <string name="settings_start_on_boot_body">Re-attach automatically after a reboot.</string>
+    <string name="settings_battery">Battery optimization</string>
+    <string name="settings_battery_ok">Unrestricted — effects won\'t be killed</string>
+    <string name="settings_battery_exempt">Tap to exempt ResonanceFX so effects aren\'t stopped in the background</string>
+    <string name="settings_created_by">Created by Xeloria</string>
+    <string name="settings_license_body">Free and open-source software, licensed under the GPL-3.0. No ads, no analytics, no tracking and no network access — your audio settings never leave your device.</string>
+    <string name="settings_autoeq_credit">Headphone profiles from the AutoEq project by Jaakko Pasanen (MIT license).</string>
+    <string name="settings_open_source_licenses">Open-source licenses</string>
+
+    <!-- Language -->
+    <string name="settings_language">Language</string>
+    <string name="settings_language_system">Follow system</string>
+    <string name="settings_language_dialog_title">Choose language</string>
+
+    <!-- Licenses -->
+    <string name="licenses_body">Copyright (C) 2026 Xeloria. Licensed under the GNU General Public License, version 3 or later. The DSP core comes from Basilar, also by Xeloria (GPL-3.0-or-later). The source code, including the NOTICE file with third-party attributions, is part of the project repository.</string>
+    <string name="licenses_kemar_title">MIT KEMAR HRTF measurements</string>
+    <string name="licenses_kemar_body">Spatial audio uses the 710 head-related impulse responses measured by W. G. Gardner and K. D. Martin, &quot;HRTF Measurements of a KEMAR Dummy-Head Microphone&quot;, MIT Media Lab Perceptual Computing Technical Report #280, 1994: elevations -40 to +90 degrees, rendered at their measured azimuth and elevation.</string>
+    <string name="licenses_autoeq_title">AutoEq headphone data</string>
+
+    <!-- Controls -->
+    <string name="controls_preset">Preset</string>
+    <string name="controls_custom">Custom</string>
+    <string name="controls_none">None</string>
+    <string name="controls_band_drag_hint">Drag a band to adjust it, double-tap to reset it</string>
+    <string name="controls_band_readout">%1$s Hz %2$+.1f dB</string>
+    <string name="controls_import_failed">Import failed: %1$s</string>
+    <string name="controls_invalid_file">Not a valid file: %1$s</string>
+    <string name="controls_delete">Delete</string>
+    <string name="controls_import_file">Import %1$s</string>
+
+    <!-- EQ editors -->
+    <string name="eq_flatten">Flatten</string>
+    <string name="eq_add_band">Add band</string>
+    <string name="eq_band_number">Band %1$d</string>
+    <string name="eq_slope_q">Slope (Q)</string>
+    <string name="eq_width_q">Width (Q)</string>
+    <string name="eq_remove_band">Remove band</string>
+    <string name="band_peak">Peak</string>
+    <string name="band_low_shelf">Low shelf</string>
+    <string name="band_high_shelf">High shelf</string>
+    <string name="band_low_pass">Low-pass</string>
+    <string name="band_high_pass">High-pass</string>
+    <string name="band_band_pass">Band-pass</string>
+    <string name="band_notch">Notch</string>
+
+    <!-- AutoEQ -->
+    <string name="autoeq_engine_old">The installed engine predates AutoEQ. Flash the latest ResonanceFX module and reboot.</string>
+    <string name="autoeq_none_selected">No headphone selected</string>
+    <string name="autoeq_unknown_profile">Unknown profile</string>
+    <string name="autoeq_profile_credit">%1$s · measured by %2$s</string>
+    <string name="autoeq_filters_preamp">%1$s · preamp %2$s dB</string>
+    <string name="autoeq_choose">Choose headphone</string>
+    <string name="autoeq_change">Change headphone</string>
+    <string name="autoeq_database_summary">%1$s · %2$s · AutoEq project</string>
+    <string name="autoeq_matches_for">Matches for %1$s</string>
+    <string name="autoeq_all_headphones">All headphones</string>
+    <string name="autoeq_no_match">No match. Try fewer words, e.g. just the model number.</string>
+    <string name="autoeq_active">Active</string>
+    <string name="autoeq_clear">Clear</string>
+    <string name="action_back">Back</string>
+
+    <!-- Speaker measurement -->
+    <string name="measure_your_speaker">Your measurement</string>
+    <string name="measure_intro">Measure your speaker with the phone\'s microphone and get a correction made for it.</string>
+    <string name="measure_start">Measure speaker</string>
+    <string name="measure_pick_measured_above">Pick &quot;Measured&quot; above to hear it.</string>
+    <string name="measure_again">Measure again</string>
+    <string name="measure_use_it">Use it</string>
+    <string name="measure_sound_like">Sound like</string>
+    <string name="measure_natural_target">Natural (neutral speaker target)</string>
+    <string name="measure_sound_like_hint">Makes this speaker sound like another one you measured, within the range both can play.</string>
+    <string name="measure_legend_measured">Measured</string>
+    <string name="measure_legend_corrected">Corrected</string>
+    <string name="measure_corrects">Corrects %1$s Hz – %2$s Hz with %3$s</string>
+    <string name="measure_headroom">, %1$s dB headroom</string>
+    <string name="measure_distortion_test">Distortion test</string>
+    <string name="measure_band_deep_bass">Deep bass (below 125 Hz)</string>
+    <string name="measure_band_bass">Bass (125-250 Hz)</string>
+    <string name="measure_band_low_mids">Low mids (250-500 Hz)</string>
+    <string name="measure_band_mids">Mids (500 Hz-1 kHz)</string>
+    <string name="measure_band_upper_mids">Upper mids (1-4 kHz)</string>
+    <string name="measure_distortion_clean">clean at every level tested</string>
+    <string name="measure_distortion_quiet">distorts even at the quietest level tested</string>
+    <string name="measure_distortion_up_to">clean up to %1$s dB</string>
+    <string name="measure_band_line">%1$s: %2$s</string>
+    <string name="measure_band_number">Band %1$d</string>
+    <string name="measure_distortion_hint">Pick &quot;Measured&quot; in Speaker protection to hold each band below where it distorts.</string>
+    <string name="measure_failed">The measurement failed.</string>
+    <string name="measure_failed_detail">The measurement failed: %1$s</string>
+    <string name="measure_permission">Measuring needs the microphone. Allow it and try again.</string>
+    <string name="measure_step_1">Turn off other sound effects first (Dolby Atmos, Adapt Sound, other equalizer apps).</string>
+    <string name="measure_step_2">Set media volume to a normal listening level. It\'s at %1$d%% now%2$s</string>
+    <string name="measure_step_2_low">, which is probably too low.</string>
+    <string name="measure_step_2_ok">.</string>
+    <string name="measure_step_3">Hold the phone where your ears would be, facing the speaker. For the phone\'s own speakers, hold it as you normally do; that result is approximate, because the microphone sits next to one of them.</string>
+    <string name="measure_step_4">Keep the room quiet. You\'ll hear two sweeps, about 12 seconds in all.</string>
+    <string name="measure_disclaimer">Effects pause while measuring. Phone microphones aren\'t calibrated, so the correction stays gentle: at most +6 dB, and only where your speaker can play. The recording never leaves the phone.</string>
+    <string name="measure_distortion_option">Also find where it starts to distort</string>
+    <string name="measure_distortion_option_hint">Five more sweeps, each louder, up to full scale (about 30 seconds). It stops as soon as the speaker distorts. Use it at the volume you listen at.</string>
+    <string name="measure_running">Measuring… keep quiet</string>
+    <string name="measure_retry">Retry</string>
+    <string name="measure_discard">Discard</string>
+    <string name="measure_save_and_use">Save and use</string>
+    <string name="measure_try_again">Try again</string>
+    <string name="action_start">Start</string>
+
+    <!-- Engine measurements dialog -->
+    <string name="measurements_intro">Measured, not claimed: what every effect actually does to the sound, measured on the engine itself%1$s. The same numbers are published with every release.</string>
+    <string name="measurements_version"> (version %1$s)</string>
+    <string name="measurements_unavailable">Measurements unavailable: %1$s</string>
+    <string name="measurements_crosstalk_legend">Purple: the same channel. Second curve: what leaks into the other channel.</string>
+    <string name="measurements_noise">Loudness change (pink noise): %1$s dB</string>
+    <string name="measurements_thd">Distortion at -12 dBFS: %1$s at 100 Hz, %2$s at 1 kHz</string>
+    <string name="measurements_dynamics">Loud tone (-3 dBFS): %1$s dB · quiet tone (-40 dBFS): %2$s dB</string>
+    <string name="measurements_width">Stereo width (side/mid): %1$s dB</string>
+    <string name="measurements_tail">Tail 0.3-1.3 s after a click: %1$s dB</string>
+
+    <!-- Miscellaneous -->
+    <string name="error_autoeq_engine_old">AutoEQ needs the ResonanceFX engine v1.0.4 or newer - update the module.</string>
+    <string name="error_autoeq_profile_missing">AutoEQ: profile &quot;%1$s&quot; not found</string>
+    <string name="error_waiting_sample_rate">%1$s: waiting for the output sample rate</string>
+    <string name="error_control">%1$s: %2$s</string>
+
+    <!-- Plurals -->
+    <plurals name="autoeq_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filters</item>
+    </plurals>
+    <plurals name="autoeq_models">
+        <item quantity="one">%d model</item>
+        <item quantity="other">%d models</item>
+    </plurals>
+    <plurals name="autoeq_measurements">
+        <item quantity="one">%d measurement</item>
+        <item quantity="other">%d measurements</item>
+    </plurals>
+    <plurals name="autoeq_search">
+        <item quantity="one">Search %d headphone</item>
+        <item quantity="other">Search %d headphones</item>
+    </plurals>
+    <plurals name="measure_filters">
+        <item quantity="one">%d filter</item>
+        <item quantity="other">%d filters</item>
+    </plurals>
+
+</resources>

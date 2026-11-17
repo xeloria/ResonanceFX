@@ -60,7 +60,8 @@ class Repository(private val context: Context) {
         get() = prefs.getBoolean("start_on_boot", true)
         set(value) = prefs.edit { putBoolean("start_on_boot", value) }
 
-    val activeProfileName: String get() = if (perDeviceProfiles) _route.value.label else "All outputs"
+    val activeProfileName: String
+        get() = if (perDeviceProfiles) _route.value.label else context.getString(io.github.resonancefx.R.string.effects_all_outputs)
 
     fun onRouteChanged(route: Route) {
         rememberLabel(route)

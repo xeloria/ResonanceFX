@@ -28,6 +28,8 @@ modern Material You app.
   and USB DAC; JSON presets with import/export.
 - **Live status**: see whether the engine is registered, attached and processing, with a
   built-in test tone and a copyable diagnostics report.
+- **Speaks your language**: English, 日本語, Русский, 简体中文, Español, 한국어 and Français.
+  Follows the device language automatically; **Settings → Language** overrides it.
 - **Robust engine**: any channel layout (1–28 ch), PCM 16/24/32-bit, 8.24 and float, saturating
   output (no wrap-around crackle), real-time-safe locking, bounds-checked commands; arm, arm64,
   x86, x86_64, 16 KB pages.

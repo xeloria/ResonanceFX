@@ -4,6 +4,7 @@
 package io.github.resonancefx
 
 import android.Manifest
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -31,6 +32,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import io.github.resonancefx.localization.AppLanguage
 import io.github.resonancefx.service.EngineService
 import io.github.resonancefx.ui.EffectsScreen
 import io.github.resonancefx.ui.PresetsScreen
@@ -40,6 +43,10 @@ import io.github.resonancefx.ui.StatusScreen
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -58,7 +65,7 @@ class MainActivity : ComponentActivity() {
                                     selected = tab == i,
                                     onClick = { tab = i },
                                     icon = { Icon(icon, contentDescription = null) },
-                                    label = { Text(label) },
+                                    label = { Text(stringResource(label)) },
                                 )
                             }
                         }
@@ -83,11 +90,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        val tabs: List<Pair<String, ImageVector>> = listOf(
-            "Effects" to Icons.Outlined.Equalizer,
-            "Presets" to Icons.Outlined.LibraryMusic,
-            "Status" to Icons.Outlined.Info,
-            "Settings" to Icons.Outlined.Settings,
+        val tabs: List<Pair<Int, ImageVector>> = listOf(
+            R.string.nav_effects to Icons.Outlined.Equalizer,
+            R.string.nav_presets to Icons.Outlined.LibraryMusic,
+            R.string.nav_status to Icons.Outlined.Info,
+            R.string.nav_settings to Icons.Outlined.Settings,
         )
     }
 }
