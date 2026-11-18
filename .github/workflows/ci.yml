@@ -56,6 +56,11 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: android-actions/setup-android@v3
+        with:
+          # The runner already provides cmdline-tools. setup-android's default
+          # "tools platform-tools" tries to install the removed legacy "tools"
+          # package and fails with "Failed to find package 'tools'".
+          packages: ""
       - name: Install NDK and CMake
         run: sdkmanager --install "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}" > /dev/null
       - name: Build engine

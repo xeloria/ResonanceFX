@@ -8,7 +8,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/build/host-test"
 mkdir -p "$OUT"
 CXX="${CXX:-g++}"
-mapfile -t SOURCES < <(find "$ROOT/engine/src" -name '*.cpp')
+# The AIDL front-end needs AOSP/platform headers (cutils, aidl, android-base) that a plain
+# host build does not have. It is covered by the Android build, not this harness.
+mapfile -t SOURCES < <(find "$ROOT/engine/src" -path "$ROOT/engine/src/android/aidl" -prune -o -name '*.cpp' -print)
 "$CXX" -std=c++20 -O1 -g -fno-omit-frame-pointer \
     -fsanitize=address,undefined -fno-sanitize-recover=undefined \
     -I"$ROOT/engine/src" -I"$ROOT/engine/src/core/include" -I"$ROOT/engine/tests" \
