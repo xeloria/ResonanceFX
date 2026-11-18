@@ -30,3 +30,21 @@ app under Settings > Open-source licenses). Measurements by their respective sou
 
 The root module's installer conventions follow the Magisk module template (Zackptg5 and
 contributors); module/META-INF/com/google/android/update-binary is an original minimal stub.
+
+Android AIDL effect front-end
+-----------------------------
+
+engine/src/android/aidl/third_party/aosp contains code from the Android Open Source Project,
+Copyright (C) 2022-2023 The Android Open Source Project, licensed under the Apache License,
+Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0): EffectImpl, EffectContext,
+EffectThread, the effect-impl headers, the FMQ headers and EventFlag/FmqInternal, adapted for
+an out-of-tree NDK build. engine/src/android/aidl/generated contains headers generated from
+the frozen android.hardware.audio.effect V3 API (also Apache-2.0). The modifications are
+listed in engine/src/android/aidl/README.md; a copy of the licence is in
+engine/src/android/aidl/third_party/aosp/LICENSE.
+
+engine/src/android/aidl/prebuilt/arm64-v8a/android.hardware.audio.effect-V3-ndk.so is the
+AOSP Android 16 frozen effect interface library (Apache-2.0), used only at link time and not
+shipped in the module. Provenance and SHA-256 are recorded in
+engine/src/android/aidl/prebuilt/README.md.
+

@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.5.0
+
+Added:
+
+- **Android 16+ AIDL effect HAL support.** The engine now ships
+  `libresonancefx_aidl_<api>.so`, a front-end for ROMs whose effect factory only loads AIDL
+  plug-ins (Android 16 One UI 8.5 and newer). The parameter payload, presets and DSP are
+  unchanged; HIDL/legacy ROMs keep using `libresonancefx.so`.
+- **Differential surround: wider and mono-safe.** The Haas effect now delays only the side
+  signal, keeping the centre image intact. A 120 Hz high-pass on the side removes the
+  low-frequency cancellation of the old full-channel delay, width changes are ramped over
+  20 ms, delay changes keep the click-free dip, and near-mono material bypasses the delay
+  automatically. **Width** is exposed in the effect; the high-pass and mono guard stay at
+  their safe defaults. Contributed by @xiamoYuF.
+
+Changed:
+
+- Version 2.5.0 (20500). This includes the Haas refactor that the 2.4.0 snapshot had
+  replaced; 2.4.0 itself stays as published.
+
 ## v2.4.0
 
 Added:
@@ -12,12 +32,6 @@ Added:
   measurement entries with their settings descriptions.
 - The engine measurement page now reads its prose from resources keyed by the English effect
   name, so the numbers stay in one generated file and translations cannot drift from them.
-- **Differential surround: wider and mono-safe.** The Haas effect now delays only the side
-  signal, keeping the centre image intact. A 120 Hz high-pass on the side removes the
-  low-frequency cancellation of the old full-channel delay, width changes are ramped over
-  20 ms, delay changes keep the click-free dip, and near-mono material bypasses the delay
-  automatically. **Width** is exposed in the effect; the high-pass and mono guard stay at
-  their safe defaults. Contributed by @xiamoYuF.
 
 Changed:
 

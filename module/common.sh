@@ -8,6 +8,8 @@
 
 RFX_ID=resonancefx
 RFX_UUID=4daa8eaa-0842-4a8d-82e9-6eee5827fbe4
+# The type UUID reported in the effect descriptor (the legacy build uses the same value).
+RFX_TYPE_UUID=ec7178ec-e5e1-4432-a3f4-4657e6795210
 RFX_LIB=libresonancefx.so
 RFX_LIB_NAME=resonancefx
 RFX_EFFECT_NAME=resonancefx_standard
@@ -504,7 +506,7 @@ rfx_generate_configs() {
             fi
             # The AIDL parser drops effects whose name is not a built-in type unless the entry
             # carries its own type UUID; legacy parsers ignore the attribute.
-            [ "$mode" = unknown ] || typ="$RFX_UUID"
+            [ "$mode" = unknown ] || typ="$RFX_TYPE_UUID"
         fi
         overlay="$(rfx_overlay_path "$cfg")"
         # Always keep a staged copy for the bind-mount fallback.
