@@ -602,7 +602,7 @@
     <string name="measure_field_surround">Surround de campo</string>
     <string name="measure_field_surround_settings">intensidad 4, imagen central 50 %</string>
     <string name="measure_differential_surround">Surround diferencial</string>
-    <string name="measure_differential_surround_settings">5 ms</string>
+    <string name="measure_differential_surround_settings">5 ms, anchura 100 %, paso alto lateral 120 Hz</string>
     <string name="measure_headphone_surround">Surround para auriculares+</string>
     <string name="measure_headphone_surround_settings">calidad 3</string>
     <string name="measure_reverberation">Reverberación</string>

@@ -416,6 +416,11 @@ object Catalog {
                 }) { fx, v ->
                     fx.set(Params.DIFFERENTIAL_SURROUND_DELAY, (v + 1) * 100)
                 },
+                Slider("diff.width", R.string.label_width, 0..200, 100, { c, v ->
+                    c.getString(R.string.value_percent, v)
+                }) { fx, v ->
+                    fx.set(Params.DIFFERENTIAL_SURROUND_WIDTH, v)
+                },
             ),
         ),
         Section(

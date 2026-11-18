@@ -101,8 +101,13 @@ enum Param : int32_t {
     kFieldSurroundMidImage = 65555,  // 100..200 -> mid level 0..100 %
     kFieldSurroundDepth = 65556,     // 200..800 -> side widening 0..1 (up to x2.5 = +8 dB)
 
+    // Differential surround (Haas effect).
+    // Uses Mid/Side separation to delay only the side signal, preserving the centre image.
     kDiffSurroundEnable = 65557,
-    kDiffSurroundDelay = 65558,  // 100..2000 -> 1..20 ms
+    kDiffSurroundDelay = 65558,      // 100..2000 -> 1..20 ms
+    kDiffSurroundWidth = 65590,      // 0..200 -> 0.0..2.0 width multiplier
+    kDiffSurroundHighpass = 65591,   // 80..250 Hz high-pass cutoff for the side signal
+    kDiffSurroundProtect = 65592,    // 0 or 1: dynamic mono protection
 
     kReverbEnable = 65559,
     kReverbRoomSize = 65560,  // 0..100

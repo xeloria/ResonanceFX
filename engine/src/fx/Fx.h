@@ -55,12 +55,25 @@ private:
     BiquadCoeffs hp_;
 };
 
-/// Precedence-effect (Haas) spaciousness: delays the right channel by 1-20 ms.
+/// Precedence-effect (Haas) spaciousness: delays the side channel to widen the stereo image.
+/// Uses Mid/Side separation to preserve the centre image and adds safety mechanisms.
 class HaasDelay {
 public:
     void prepare(double sampleRate);
     void reset();
+
+    /// Sets the delay time in milliseconds (1-20 ms).
     void setDelayMs(float ms);
+
+    /// Sets the gain multiplier for the delayed side signal (0.0 to 2.0).
+    void setWidth(float width);
+
+    /// Sets the high-pass cutoff frequency for the side signal (80-250 Hz) to protect bass.
+    void setHighpassHz(float hz);
+
+    /// Enables or disables the dynamic mono bypass protection.
+    void setMonoProtection(bool enabled);
+
     void process(float* left, float* right, int n);
 
 private:
@@ -69,7 +82,34 @@ private:
     int pos_ = 0, delay_ = 0;
     // Delay jumps would click, so the change lands in the middle of a short dip envelope.
     float pendingDelayMs_ = -1.0f;
+
+    // Target delay in milliseconds, preserved across sample rate changes.
+    float targetDelayMs_ = 5.0f;
+
     int dipRemaining_ = 0, dipTotal_ = 0;
+
+    // Width parameters.
+    float width_ = 1.0f;          // target width from the UI
+    float widthCurrent_ = 1.0f;   // smoothed width used in the DSP
+    float widthStep_ = 0.0f;      // constant step per sample to reach the target
+    int widthRampRemaining_ = 0;  // samples remaining in the ramp
+
+    float hpHz_ = 120.0f;
+    bool monoProtectEnabled_ = true;
+
+    BiquadCoeffs hpCoeffs_;
+    BiquadState hpState_;
+
+    double lfoPhase_ = 0.0;
+    double lfoInc_ = 0.0;
+
+    // Envelope followers for dynamic mono protection.
+    float midEnv_ = 0.0f;
+    float sideEnv_ = 0.0f;
+    float envCoef_ = 0.0f;
+    int envCounter_ = 0;
+    bool isMonoActive_ = false;
+    float monoFactor_ = 1.0f;
 };
 
 /// Dynamic bass: a low shelf whose boost rises when the programme is light on bass and backs

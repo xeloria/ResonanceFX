@@ -597,7 +597,7 @@
     <string name="measure_field_surround">필드 서라운드</string>
     <string name="measure_field_surround_settings">강도 4, 중앙 이미지 50 %</string>
     <string name="measure_differential_surround">디퍼런셜 서라운드</string>
-    <string name="measure_differential_surround_settings">5 ms</string>
+    <string name="measure_differential_surround_settings">5 ms, 폭 100 %, 사이드 하이패스 120 Hz</string>
     <string name="measure_headphone_surround">헤드폰 서라운드+</string>
     <string name="measure_headphone_surround_settings">품질 3</string>
     <string name="measure_reverberation">리버브</string>

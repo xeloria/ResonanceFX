@@ -37,7 +37,7 @@
     <string name="measure_field_surround" formatted="false">Field surround</string>
     <string name="measure_field_surround_settings" formatted="false">strength 4, mid image 50 %</string>
     <string name="measure_differential_surround" formatted="false">Differential surround</string>
-    <string name="measure_differential_surround_settings" formatted="false">5 ms</string>
+    <string name="measure_differential_surround_settings" formatted="false">5 ms, width 100%, side high-pass 120 Hz</string>
     <string name="measure_headphone_surround" formatted="false">Headphone surround+</string>
     <string name="measure_headphone_surround_settings" formatted="false">quality 3</string>
     <string name="measure_reverberation" formatted="false">Reverberation</string>
