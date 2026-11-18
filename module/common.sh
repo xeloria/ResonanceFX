@@ -146,13 +146,42 @@ rfx_is_aidl_config() {
 # The ABI whose engine is installed (the 64-bit one when the device has both).
 rfx_primary_abi() { rfx_lib_targets | awk 'NR == 1 { print $2 }'; }
 
-# The AIDL engine packaged for this platform, if any: a <name>_<api>.so build wins over the
-# single-platform default, so one module zip can carry several Android releases.
+# The AIDL engine packaged for this platform, if any. Builds are named after the Android
+# release they were compiled against (<name>_<api>.so), but the AIDL interface library is
+# frozen and stays on newer releases, so a build for an older API keeps working on a newer
+# one (an API 36 build on Android 17). Order: exact API, then the newest build not newer
+# than this platform, then the unversioned single-platform default.
 rfx_aidl_lib() {
     abi="$(rfx_primary_abi)"
-    for lib in "libresonancefx_aidl_$(rfx_api).so" "$RFX_LIB_AIDL"; do
-        [ -f "$MODDIR/engine/$abi/$lib" ] && { echo "$lib"; return; }
+    dir="$MODDIR/engine/$abi"
+    api="$(rfx_api)"
+    case "$api" in ''|*[!0-9]*) api=0 ;; esac
+
+    if [ -f "$dir/libresonancefx_aidl_$api.so" ]; then
+        echo "libresonancefx_aidl_$api.so"
+        return
+    fi
+
+    best=""
+    best_api=0
+    for f in "$dir"/libresonancefx_aidl_*.so; do
+        [ -f "$f" ] || continue
+        n="${f##*/}"
+        n="${n#libresonancefx_aidl_}"
+        n="${n%.so}"
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        [ "$n" -le "$api" ] || continue
+        if [ "$n" -gt "$best_api" ]; then
+            best_api="$n"
+            best="${f##*/}"
+        fi
     done
+    if [ -n "$best" ]; then
+        echo "$best"
+        return
+    fi
+
+    [ -f "$dir/$RFX_LIB_AIDL" ] && echo "$RFX_LIB_AIDL"
 }
 
 # The engine build the current factory can load, or the legacy one when no AIDL build is shipped.

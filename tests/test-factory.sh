@@ -63,6 +63,20 @@ check "aidl lib: versioned build" libresonancefx_aidl_36.so \
     "$(run "MODDIR='$SANDBOX/mod'; RFX_TEST_API=36; $selector")"
 check "aidl lib: unversioned fallback" libresonancefx_aidl.so \
     "$(run "MODDIR='$SANDBOX/mod'; RFX_TEST_API=35; $selector")"
+# Android 17 (API 37) with only the API 36 build: the frozen AIDL interface still loads it.
+# This used to return the legacy engine because the exact-API name did not exist.
+check "aidl lib: older build on a newer platform" libresonancefx_aidl_36.so \
+    "$(run "MODDIR='$SANDBOX/mod'; RFX_TEST_API=37; $selector")"
+
+mkdir -p "$SANDBOX/mod-multi/engine/arm64-v8a"
+: > "$SANDBOX/mod-multi/engine/arm64-v8a/libresonancefx_aidl_35.so"
+: > "$SANDBOX/mod-multi/engine/arm64-v8a/libresonancefx_aidl_36.so"
+check "aidl lib: newest build not newer than the platform" libresonancefx_aidl_36.so \
+    "$(run "MODDIR='$SANDBOX/mod-multi'; RFX_TEST_API=37; $selector")"
+check "aidl lib: exact match wins" libresonancefx_aidl_36.so \
+    "$(run "MODDIR='$SANDBOX/mod-multi'; RFX_TEST_API=36; $selector")"
+check "aidl lib: too-new build ignored" "" \
+    "$(run "MODDIR='$SANDBOX/mod-multi'; RFX_TEST_API=34; $selector")"
 
 # ---- entry shape ----------------------------------------------------------------------------
 
