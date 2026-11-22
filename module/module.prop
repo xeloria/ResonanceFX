@@ -1,7 +1,6 @@
 id=resonancefx
 name=ResonanceFX
-version=v2.5.0
-versionCode=20500
+version=v2.5.1
+versionCode=20501
 author=Xeloria
 description=Free and open-source audio effects engine by Xeloria.
-

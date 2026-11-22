@@ -25,8 +25,9 @@ real-time DSP engine, a universal Magisk / KernelSU / APatch module, and a moder
 
 ---
 
-> **🆕 What's new in 2.5.0** — Android 16+ **AIDL effect-HAL support** (One UI 8.5 and newer), and a
-> **wider, mono-safe differential surround**. Full details in the [changelog](CHANGELOG.md).
+> **🆕 What's new in 2.5.1** — Android 17 AIDL installs: the API 36 engine is now selected on
+> newer releases and placed where an APEX effect HAL can load it. Preset deletion also asks for
+> confirmation. Full details in the [changelog](CHANGELOG.md).
 
 ## 💡 Why ResonanceFX?
 
@@ -102,7 +103,7 @@ restarts and impulse-response re-upload when the output sample rate changes.
 | Symptom | Fix |
 | --- | --- |
 | **Status says the engine isn't registered** | Tap the module's **Action** button in your root manager. It re-patches every config, re-applies mounts, restarts the audio services and prints what it found. Reboot, then check again. |
-| **`UUID not found in HAL and proxy list`** on Android 16 | The ROM only loads AIDL effect plug-ins. Use **2.5.0 or newer**; the module installs `libresonancefx_aidl_<api>.so` automatically. |
+| **`UUID not found in HAL and proxy list`** on Android 16 | The ROM only loads AIDL effect plug-ins. Use **2.5.1 or newer**; the module installs `libresonancefx_aidl_<api>.so` automatically. |
 | **Effects are on but nothing sounds different** | Make sure audio is playing and the effect switch is on. Try the built-in **test tone** in Status, and check the per-device profile for the output you're using. |
 | **Sound stops after a call or a Bluetooth switch** | The engine re-attaches on its own; if it doesn't, tap **Action**, then reboot. |
 | **Need help or want to report a bug** | In the app: **Status → Copy report**. Attach that plus the logs below to an issue. |

@@ -8,8 +8,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Driver version reported through the version getters.
-set(RFX_VERSION_CODE 20500 CACHE STRING "Driver version code")
-set(RFX_VERSION_NAME "2.5.0" CACHE STRING "Driver version name")
+set(RFX_VERSION_CODE 20501 CACHE STRING "Driver version code")
+set(RFX_VERSION_NAME "2.5.1" CACHE STRING "Driver version name")
 
 # Everything except the Android entry-point glue (the DSP core and the processors are shared by
 # both effect-library ABIs).
@@ -102,4 +102,3 @@ foreach (target resonancefx resonancefx_aidl)
     add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_STRIP} --strip-unneeded $<TARGET_FILE:${target}>)
 endforeach ()
-

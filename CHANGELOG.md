@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.5.1
+
+Fixed:
+
+- **AIDL install on Android 17 and newer.** The installer now selects the newest AIDL build
+  that is not newer than the running release (the AIDL interface library is frozen), so the
+  API 36 engine is used on API 37 instead of concluding that no AIDL engine is shipped.
+  Previously the AIDL configs were left untouched and the HAL never saw the effect.
+- **AIDL engine location for APEX effect HALs.** The AIDL build is installed only in
+  `/system/lib64/soundfx`; an APEX-hosted effect HAL (Samsung/Exynos) permits `/system/lib64`
+  but not `/vendor/lib64`, and the AOSP factory searches `/odm`, `/vendor`, `/system` in that
+  order. The legacy AELI build stays in `/vendor`, and stale AIDL copies are removed there.
+- **Preset deletion asks for confirmation** in the app, naming the preset; Cancel, back or an
+  outside tap leaves it in place.
+
+Changed:
+
+- Version 2.5.1 (20501). Engine DSP is unchanged; the measurements differ only in the reported
+  engine version.
+- Source builds of the AIDL front-end include the minimal `system/graphics.h` shim needed by
+  the vendored `thread_defs.h`.
+- CI and release workflows skip the removed legacy `tools` package, and the host test harness
+  no longer tries to compile the AIDL front-end.
+
 ## v2.5.0
 
 Added:
