@@ -36,13 +36,19 @@ class Settings private constructor(private val values: Map<String, Any>) {
     override fun hashCode() = Catalog.defaults.keys.sumOf { this[it].hashCode() }
 
     companion object {
-        const val FORMAT = "resonancefx.settings.v2" // v1 stored bass.gain as a table index
+        const val FORMAT = "resonancefx.settings.v3" // v2 stored the Master sliders as table indices
+        private const val FORMAT_V1 = "resonancefx.settings.v1"
+        private const val FORMAT_V2 = "resonancefx.settings.v2"
         val DEFAULT = Settings(emptyMap())
 
         fun fromJson(json: JSONObject): Settings {
             val v = json.optJSONObject("values") ?: json
-            // v1 stored bass.gain as a boost-table index (0..11); v2 stores dB x10 (0..170).
-            val legacy = json.optString("format") != FORMAT
+            val format = json.optString("format")
+            // v1 has no stamp (or the old one) and stored bass.gain as a boost-table index (0..11);
+            // v2+ stores dB x10 (0..170).
+            val legacyBass = format.isEmpty() || format == FORMAT_V1
+            // v1 and v2 stored the Master sliders as table indices; v3 stores half-dB units.
+            val legacyMaster = legacyBass || format == FORMAT_V2
             val parsed = HashMap<String, Any>()
             Catalog.defaults.forEach { (key, default) ->
                 if (!v.has(key)) return@forEach
@@ -53,8 +59,19 @@ class Settings private constructor(private val values: Map<String, Any>) {
                     is String -> raw.toString()
                     else -> null
                 }
-                if (legacy && key == "bass.gain" && value is Int) {
+                if (legacyBass && key == "bass.gain" && value is Int) {
                     value = (Tables.BASS_BOOST_DB[value.coerceIn(Tables.BASS_BOOST_DB.indices)].toFloat() * 10).roundToInt()
+                }
+                if (legacyMaster && value is Int) {
+                    val index = value
+                    value = when (key) {
+                        // The old tables held a linear gain x100, so this loses nothing.
+                        Catalog.KEY_MASTER_VOLUME ->
+                            Catalog.halfDb(Tables.OUTPUT_VOLUME_VALUES[index.coerceIn(Tables.OUTPUT_VOLUME_VALUES.indices)])
+                        Catalog.KEY_MASTER_LIMIT ->
+                            Catalog.halfDb(Tables.OUTPUT_DB_VALUES[index.coerceIn(Tables.OUTPUT_DB_VALUES.indices)])
+                        else -> index
+                    }
                 }
                 if (value != null) parsed[key] = clamp(key, value)
             }

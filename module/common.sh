@@ -23,6 +23,10 @@ RFX_DATA="${RFX_DATA:-/data/adb/resonancefx}"
 RFX_STAGE=$RFX_DATA/stage
 RFX_LOGDIR=$RFX_DATA/logs
 RFX_STATE=$RFX_DATA/state
+# Stock copies of the effect configs, taken before the module is mounted. Patching from these
+# instead of re-reading the live system keeps the Action button from destroying a working
+# install (see rfx_snapshot_configs).
+RFX_SOURCES=$RFX_STAGE/src
 
 # Our own library/effect names. Entries with these names (or our UUID) are removed before ours
 # is added, so re-patching an already patched config never duplicates it.
@@ -310,13 +314,44 @@ rfx_lib_partitions_for() {
     true
 }
 
-# Android 8+ loads effects in the vendor audio HAL; /system copies of the configs are read only
-# by framework processes that can't load vendor libraries anyway (Samsung's audioserver logs
-# "library not found" for them), so they're left alone.
+# Directories the framework searches for audio_effects*.xml, in order (system/media
+# audio_config.h). The SKU directory is only on the list when the bootloader set
+# ro.boot.product.vendor.sku, so a ROM that ships only the SKU copy makes the factory fall
+# through to the next candidate.
+rfx_config_search_dirs() {
+    echo /odm/etc
+    sku="$(getprop ro.boot.product.vendor.sku 2>/dev/null)"
+    [ -n "$sku" ] && echo "/vendor/etc/audio/sku_$sku"
+    echo /vendor/etc
+    echo /system/etc
+    true
+}
+
+# The first existing config with this file name in the framework's search order.
+rfx_first_config() {
+    for d in $(rfx_config_search_dirs); do
+        if [ -f "$d/$1" ]; then echo "$d/$1"; return; fi
+    done
+}
+
+# True when the framework would parse this path: it is the first existing file with that name.
+rfx_is_effective_config() {
+    first="$(rfx_first_config "${1##*/}")"
+    [ -n "$first" ] || return 1
+    [ "$(readlink -f "$first" 2>/dev/null || echo "$first")" = "$1" ]
+}
+
+# Android 8+ normally loads effects in the vendor audio HAL, so /system copies are left alone:
+# framework processes that read them can't load vendor libraries anyway (Samsung's audioserver
+# logs "library not found" for them). The exception is a ROM with no readable vendor config at
+# all: the framework then falls back to /system/etc, which must carry the effect too.
 rfx_config_wanted() {
     case "$1" in
         /system/vendor/*) return 0 ;;
-        /system/*) [ "$(rfx_api)" -lt 26 ] ;;
+        /system/*)
+            [ "$(rfx_api)" -lt 26 ] || rfx_is_effective_config "$1"
+            return
+            ;;
         *) return 0 ;;
     esac
 }
@@ -533,10 +568,32 @@ rfx_stage_libraries() {
     done
 }
 
-# Regenerates every patched config from the *current* stock files. Run at install time and
-# again early on every boot, so OTA updates and vendor config changes never leave a stale copy.
+# Snapshots every stock config before the module is mounted (post-fs-data and install). The
+# Action button runs after mounting, where deleting an overlay copy can hide the stock file:
+# re-finding the configs then comes up empty and the factory loses the effect. Patching from a
+# pre-mount snapshot makes regeneration independent of that view.
+# Records each target in $RFX_STATE/config_sources as "<real path>|<stock copy>".
+rfx_snapshot_configs() {
+    rm -rf "$RFX_SOURCES"
+    mkdir -p "$RFX_SOURCES"
+    : > "$RFX_STATE/config_sources"
+    rfx_find_configs | while read -r cfg; do
+        [ -f "$cfg" ] || continue
+        snap="$RFX_SOURCES/$(echo "$cfg" | sed 's|/|__|g')"
+        cp -f "$cfg" "$snap" 2>/dev/null || { rfx_log "cannot snapshot $cfg"; continue; }
+        chmod 0644 "$snap"
+        echo "$cfg|$snap" >> "$RFX_STATE/config_sources"
+    done
+}
+
+# Regenerates every patched config from the stock snapshots. Run at install time and again
+# early on every boot, so OTA updates and vendor config changes never leave a stale copy.
 # Records each target in $RFX_STATE/configs as "<real path>|<patched copy>".
 rfx_generate_configs() {
+    # No snapshot (an Action run before any boot script, or an old install): take one now, from
+    # whatever is visible, so the module can still try to do the right thing.
+    [ -s "$RFX_STATE/config_sources" ] || rfx_snapshot_configs
+
     : > "$RFX_STATE/configs"
     # Drop previous generated copies so configs removed by an OTA don't linger in the overlay.
     # KernelSU moves system/vendor (and odm, product, system_ext) to the module root and leaves a
@@ -555,7 +612,9 @@ rfx_generate_configs() {
     aidl_lib="$(rfx_aidl_lib)"
     echo "$mode" > "$RFX_STATE/factory_used"
 
-    rfx_find_configs | while read -r cfg; do
+    while IFS='|' read -r cfg src; do
+        [ -n "$cfg" ] || continue
+        [ -f "$src" ] || { rfx_log "missing stock copy of $cfg"; continue; }
         rfx_config_wanted "$cfg" || { rfx_log "left alone $cfg (framework copy)"; continue; }
         libname="$RFX_LIB_NAME"; libpath="$RFX_LIB"; typ=""
         if rfx_is_aidl_config "$cfg"; then
@@ -570,7 +629,7 @@ rfx_generate_configs() {
         overlay="$(rfx_overlay_path "$cfg")"
         # Always keep a staged copy for the bind-mount fallback.
         staged="$RFX_STAGE/cfg$(echo "$cfg" | sed 's|/|__|g')"
-        if rfx_patch_any "$cfg" "$staged" "$libname" "$libpath" "$typ"; then
+        if rfx_patch_any "$src" "$staged" "$libname" "$libpath" "$typ"; then
             chmod 0644 "$staged"
             chcon "$(rfx_context_of "$cfg")" "$staged" 2>/dev/null
             if [ -n "$overlay" ]; then
@@ -584,7 +643,7 @@ rfx_generate_configs() {
         else
             rfx_log "skipped $cfg (no libraries/effects sections)"
         fi
-    done
+    done < "$RFX_STATE/config_sources"
 }
 
 # ---- Verification & fallback ----------------------------------------------------------------

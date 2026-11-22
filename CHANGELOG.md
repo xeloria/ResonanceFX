@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.6.0
+
+Fixed:
+
+- **The Action button no longer loses the effect.** It deleted the generated config copies and
+  then re-discovered the ROM's configs from the mounted system; once the module's own copy was
+  gone, discovery could come up empty and the factory lost ResonanceFX until the next reboot
+  (#11). The boot stage now snapshots the stock configs before mounting, and regeneration always
+  patches from that snapshot.
+- **`/system/etc/audio_effects.xml` is patched when it is the config the framework reads.** Some
+  ROMs ship no `/odm` or `/vendor` config, so the factory falls back to the framework copy (and
+  so does AudioPolicy). It is still left alone when a vendor or SKU config takes precedence.
+- **The Action verdict is honest when nothing was patched.** An empty config list used to be
+  reported as "library and configs are visible"; it now names the real problem.
+- **The app detects QTI SKU configs** (`/vendor/etc/audio/sku_*`) and the `/system` copy, so the
+  Status screen no longer says "Effect factory: not installed" when the module is loaded.
+
+Changed:
+
+- **Master gain and limiter use 0.5 dB steps.** The recovered vendor tables jumped from -6.0 dB
+  to -10.5 dB (and the limiter had six positions); both sliders now span 0.5 dB steps from
+  -40.0 to +6.0 dB and -20.0 to 0.0 dB (#12). Settings move to format v3: existing profiles and
+  presets are migrated by their old table index and never shift by more than 0.25 dB.
+- Slider values round to the nearest step instead of truncating, so negative ranges feel the
+  same in both directions.
+- Version 2.6.0 (20600). Engine DSP is unchanged; the measurements differ only in the reported
+  engine version.
+
 ## v2.5.1
 
 Fixed:

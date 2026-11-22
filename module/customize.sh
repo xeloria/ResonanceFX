@@ -38,7 +38,7 @@ else
     rfx_print "- Clearing leftovers from the previous install"
     rfx_unmount_all
 fi
-rm -rf "$RFX_STAGE" "$RFX_STATE/configs" "$RFX_STATE/factory_used"
+rm -rf "$RFX_STAGE" "$RFX_STATE/configs" "$RFX_STATE/config_sources" "$RFX_STATE/factory_used"
 rfx_stage_libraries
 
 rfx_print "- Detecting the effect factory"
@@ -51,6 +51,7 @@ if [ "$FACTORY" = aidl ] && [ -z "$(rfx_aidl_lib)" ]; then
 fi
 
 rfx_print "- Patching audio effects configurations"
+rfx_snapshot_configs
 rfx_generate_configs
 COUNT="$(wc -l < "$RFX_STATE/configs" | tr -d ' ')"
 if [ "$COUNT" -eq 0 ]; then

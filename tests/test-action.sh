@@ -22,9 +22,10 @@ check() { # name expected unexpected
     fi
 }
 
-run_case() { # fail_calls missing lib_ok
+run_case() { # fail_calls missing lib_ok [has_configs]
     rm -rf "$SANDBOX/mod"; mkdir -p "$SANDBOX/mod" "$SANDBOX/state" "$SANDBOX/bin"
-    printf 'cfg|staged\n' > "$SANDBOX/state/configs"
+    if [ "${4:-1}" = "1" ]; then printf 'cfg|staged\n' > "$SANDBOX/state/configs"
+    else : > "$SANDBOX/state/configs"; fi
     cat > "$SANDBOX/mod/common.sh" <<EOF
 RFX_LIB=libresonancefx.so
 RFX_LIB_AIDL=libresonancefx_aidl.so
@@ -45,6 +46,7 @@ rfx_factory_matches() { cmp -s "\$1" "\$2"; }
 rfx_lib_targets() { echo "lib64 arm64-v8a"; }
 rfx_lib_partitions() { echo /vendor; }
 rfx_generate_configs() { :; }
+rfx_first_config() { :; }
 rfx_ensure_mounted() { :; }
 rfx_restart_audio() { :; }
 rfx_configs_missing() { echo $2; }
@@ -77,5 +79,11 @@ check "configs not visible reported" "Result: ❌ 2 config(s) not visible" "⚠�
 # Library exists in the shell but not in the effect process's view: name that, not the configs.
 run_case 99 0 0
 check "hidden library reported" "the audio HAL cannot see" "not visible to the audio HAL. Full"
+
+# No config could be patched: the old code reported "library and configs are visible" because an
+# empty list has zero missing entries, which is how #11 stayed hidden.
+run_case 99 0 1 0
+check "no configs is a failure" "no audio effects config is installed" "visible to the audio HAL"
+check "no configs is not reported as zero missing" "no audio effects config is installed" "0 config(s) not visible"
 
 exit $fail

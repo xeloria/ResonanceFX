@@ -21,6 +21,7 @@ rfx_log "post-fs-data: root=$(rfx_root_impl) api=$(rfx_api) abis=$(getprop ro.pr
 rm -f "$RFX_STATE/lib_mode" "$RFX_STATE/cfg_mode"
 
 rfx_stage_libraries
+rfx_snapshot_configs
 rfx_generate_configs
 rfx_log "post-fs-data: $(wc -l < "$RFX_STATE/configs" | tr -d ' ') config(s) staged"
 

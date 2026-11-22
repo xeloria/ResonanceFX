@@ -117,4 +117,75 @@ check "switch: one library" 1 "$(grep -c '<library name="resonancefx' "$switched
 check "switch: one effect" 1 "$(grep -c "uuid=\"$UUID\"" "$switched")"
 check "switch: aidl library kept" 1 "$(grep -c 'libresonancefx_aidl.so' "$switched")"
 
+# ---- effective configuration ----------------------------------------------------------------
+# The framework reads the first readable audio_effects.xml in its search order. A ROM that ships
+# only /system/etc must still get the effect (#11); one with a vendor/SKU copy must not get a
+# second definition in /system (Samsung's audioserver would log "library not found" for it).
+
+mkdir -p "$SANDBOX/eff/odm/etc" "$SANDBOX/eff/vendor/etc/audio/sku_pineapple" \
+    "$SANDBOX/eff/vendor/etc" "$SANDBOX/eff/system/etc"
+: > "$SANDBOX/eff/system/etc/audio_effects.xml"
+
+search="rfx_config_search_dirs() { echo '$SANDBOX/eff/odm/etc'; echo '$SANDBOX/eff/vendor/etc/audio/sku_pineapple'; echo '$SANDBOX/eff/vendor/etc'; echo '$SANDBOX/eff/system/etc'; }"
+effective() { # effective <search-prefix> <path>
+    run "$1; rfx_is_effective_config '$2' && echo 0 || echo 1"
+}
+wanted() { # wanted <api> <is-effective-result> <path>
+    run "rfx_api() { echo $1; }; rfx_is_effective_config() { return $2; }; rfx_config_wanted '$3' && echo 0 || echo 1"
+}
+check "config: system copy is effective without a vendor copy" 0 \
+    "$(effective "$search" "$SANDBOX/eff/system/etc/audio_effects.xml")"
+check "config: no higher-priority config wins" 1 \
+    "$(effective "$search" "$SANDBOX/eff/vendor/etc/audio_effects.xml")"
+
+: > "$SANDBOX/eff/vendor/etc/audio/sku_pineapple/audio_effects.xml"
+check "config: SKU copy is effective" 0 \
+    "$(effective "$search" "$SANDBOX/eff/vendor/etc/audio/sku_pineapple/audio_effects.xml")"
+check "config: system copy hidden by the SKU copy" 1 \
+    "$(effective "$search" "$SANDBOX/eff/system/etc/audio_effects.xml")"
+# With ro.boot.product.vendor.sku unset the SKU directory is not searched at all.
+nosku="rfx_config_search_dirs() { echo '$SANDBOX/eff/odm/etc'; echo '$SANDBOX/eff/vendor/etc'; echo '$SANDBOX/eff/system/etc'; }"
+check "config: SKU copy is not effective without the property" 1 \
+    "$(effective "$nosku" "$SANDBOX/eff/vendor/etc/audio/sku_pineapple/audio_effects.xml")"
+check "config: system copy is effective when the SKU is not searched" 0 \
+    "$(effective "$nosku" "$SANDBOX/eff/system/etc/audio_effects.xml")"
+
+check "wanted: system config patched when it is the one read" 0 \
+    "$(wanted 37 0 /system/etc/audio_effects.xml)"
+check "wanted: system config skipped when a vendor copy wins" 1 \
+    "$(wanted 37 1 /system/etc/audio_effects.xml)"
+check "wanted: pre-Android 8 always patches system" 0 \
+    "$(wanted 25 1 /system/etc/audio_effects.xml)"
+
+# ---- regeneration after mounting ------------------------------------------------------------
+# rfx_generate_configs deletes the generated copies before rebuilding them. After the module is
+# mounted the stock file can be hidden by that deletion, so re-finding comes up empty and the
+# factory loses the effect (#11). Regeneration must use the pre-mount snapshot.
+
+act="$SANDBOX/act"
+mkdir -p "$act/mod" "$act/stock/vendor/etc/audio"
+cat > "$act/stock/vendor/etc/audio/audio_effects.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<audio_effects_conf version="2.0" xmlns="http://schemas.android.com/audio/audio_effects_conf/v2_0">
+    <libraries>
+        <library name="bundle" path="libbundlewrapper.so"/>
+    </libraries>
+    <effects>
+        <effect name="bassboost" library="bundle" uuid="8631f300-72e2-11df-b57e-0002a5d5c51b"/>
+    </effects>
+</audio_effects_conf>
+XML
+
+setup="MODDIR='$act/mod'; rfx_overlay_path() { echo '$act/mod/out/audio_effects.xml'; }; rfx_factory_mode() { echo legacy; }; rfx_aidl_lib() { :; };"
+run "$setup rfx_find_configs() { echo '$act/stock/vendor/etc/audio/audio_effects.xml'; }; rfx_snapshot_configs; rfx_generate_configs"
+check "generate: patched overlay written" 1 "$(grep -c "$UUID" "$act/mod/out/audio_effects.xml")"
+snap="$SANDBOX/data/stage/src/$(echo "$act/stock/vendor/etc/audio/audio_effects.xml" | sed 's|/|__|g')"
+check "generate: stock snapshot kept" 1 "$([ -s "$snap" ] && echo 1 || echo 0)"
+
+# The Action case: the generated copy is gone and the live config is no longer discoverable.
+run "$setup rm -f '$act/mod/out/audio_effects.xml'; rfx_find_configs() { :; }; rfx_generate_configs"
+check "generate after mount: rebuilt from the snapshot" 1 "$(grep -c "$UUID" "$act/mod/out/audio_effects.xml")"
+check "generate after mount: recorded again" 1 \
+    "$(grep -c "^$act/stock/vendor/etc/audio/audio_effects.xml|" "$SANDBOX/data/state/configs")"
+
 exit $fail

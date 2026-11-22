@@ -91,6 +91,7 @@ import io.github.resonancefx.model.Slider as SliderControl
 import io.github.resonancefx.model.Toggle
 import io.github.resonancefx.service.EngineService
 import io.github.resonancefx.service.refreshMasterTile
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -316,13 +317,15 @@ private fun SliderRow(control: SliderControl, value: Int, onChange: (Int) -> Uni
     Column {
         Row {
             Text(stringResource(control.label), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(control.format(context, local.toInt()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(control.format(context, local.roundToInt()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
         Slider(
             value = local,
             onValueChange = {
                 local = it
-                if (it.toInt() != value) onChange(it.toInt())
+                // Round, not truncate: the Master sliders span negative values, where truncation
+                // would give the two halves of a step different widths.
+                if (it.roundToInt() != value) onChange(it.roundToInt())
             },
             valueRange = control.range.first.toFloat()..control.range.last.toFloat(),
             steps = (control.range.last - control.range.first - 1).coerceIn(0, 200).takeIf { control.range.last - control.range.first <= 24 } ?: 0,

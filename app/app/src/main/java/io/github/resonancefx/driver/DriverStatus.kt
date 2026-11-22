@@ -103,17 +103,28 @@ data class DriverStatus(
             fun carries(path: String): Boolean = runCatching {
                 File(path).readText().contains(Params.UUID_ENGINE.toString())
             }.getOrDefault(false)
-            val aidl = listOf(
+            // The framework parses the first readable config in this order (system/media
+            // audio_config.h): /odm/etc, /vendor/etc/audio/sku_<ro.boot.product.vendor.sku>,
+            // /vendor/etc, /system/etc. Scan the SKU directories and the framework copy too:
+            // QTI ROMs often keep only the SKU config, and a ROM without a vendor copy makes the
+            // factory (and AudioPolicy) fall back to /system.
+            val skuDirs = File("/vendor/etc/audio").listFiles()
+                ?.filter { it.isDirectory && it.name.startsWith("sku_") }
+                .orEmpty()
+                .map { it.path }
+            val aidl = (listOf(
                 "/odm/etc/audio_effects_config.xml",
                 "/vendor/etc/audio_effects_config.xml",
                 "/vendor/etc/audio_effects_config_sec.xml",
-            ).any(::carries)
-            val legacy = listOf(
+                "/system/etc/audio_effects_config.xml",
+            ) + skuDirs.map { "$it/audio_effects_config.xml" }).any(::carries)
+            val legacy = (listOf(
                 "/odm/etc/audio_effects.xml",
                 "/vendor/etc/audio_effects.xml",
                 "/vendor/etc/audio_effects_sec.xml",
                 "/vendor/etc/audio_effects_spatializer.xml",
-            ).any(::carries)
+                "/system/etc/audio_effects.xml",
+            ) + skuDirs.map { "$it/audio_effects.xml" }).any(::carries)
             return when {
                 aidl && legacy -> "AIDL + legacy"
                 aidl -> "AIDL"

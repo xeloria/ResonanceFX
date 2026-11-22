@@ -25,9 +25,9 @@ real-time DSP engine, a universal Magisk / KernelSU / APatch module, and a moder
 
 ---
 
-> **🆕 What's new in 2.5.1** — Android 17 AIDL installs: the API 36 engine is now selected on
-> newer releases and placed where an APEX effect HAL can load it. Preset deletion also asks for
-> confirmation. Full details in the [changelog](CHANGELOG.md).
+> **🆕 What's new in 2.6.0** — the Action button can no longer lose the effect on ROMs whose
+> config lives in `soundfx` overlays, and the Master sliders move in 0.5 dB steps. Full details
+> in the [changelog](CHANGELOG.md).
 
 ## 💡 Why ResonanceFX?
 

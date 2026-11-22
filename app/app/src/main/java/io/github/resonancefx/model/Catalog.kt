@@ -11,6 +11,9 @@ import io.github.resonancefx.driver.Codec
 import io.github.resonancefx.driver.EngineEffect
 import io.github.resonancefx.driver.Params
 import java.util.Locale
+import kotlin.math.log10
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Every user-facing string is a resource id, resolved when it is drawn, so the catalogue itself
@@ -100,6 +103,8 @@ class Section(
 
 object Catalog {
     const val KEY_MASTER = "master.enable"
+    const val KEY_MASTER_VOLUME = "master.volume"
+    const val KEY_MASTER_LIMIT = "master.limit"
     const val KEY_AUTOEQ_ENABLE = "autoeq.enable"
     const val KEY_AUTOEQ_PROFILE = "autoeq.profile"
     const val KEY_AUTOEQ_STRENGTH = "autoeq.strength"
@@ -130,18 +135,22 @@ object Catalog {
             "master", R.string.section_master_title, R.string.section_master_summary,
             enableKey = null, enableParam = null,
             controls = listOf(
-                Slider("master.volume", R.string.label_output_gain, 0..21, 11, { c, v ->
-                    c.getString(R.string.value_db, Tables.OUTPUT_VOLUME_DB[v])
+                // Half-dB units, 0.5 dB per step: -40.0..+6.0 dB (the engine allows up to +12;
+                // the old table stopped at +6 and keeping that avoids surprising headroom).
+                Slider(KEY_MASTER_VOLUME, R.string.label_output_gain, -80..12, 0, { c, v ->
+                    c.getString(R.string.value_db, oneDecimal(v / 2f))
                 }) { fx, v ->
-                    fx.set(Params.GATE_OUTPUT_VOLUME, Tables.OUTPUT_VOLUME_VALUES[v])
+                    fx.set(Params.GATE_OUTPUT_VOLUME, linearX100(v))
                 },
                 Slider("master.pan", R.string.label_balance, 0..100, 50, ::panLabel) { fx, v ->
                     fx.set(Params.GATE_CHANNEL_PAN, v * 2 - 100)
                 },
-                Slider("master.limit", R.string.label_limiter_threshold, 0..5, 5, { c, v ->
-                    c.getString(R.string.value_db, Tables.OUTPUT_DB[v])
+                // -20.0..0.0 dB: the engine clamps the ceiling to 10..100 (linear x100); 0.0 is
+                // its true-peak -0.1 dB limit.
+                Slider(KEY_MASTER_LIMIT, R.string.label_limiter_threshold, -40..0, 0, { c, v ->
+                    c.getString(R.string.value_db, oneDecimal(v / 2f))
                 }) { fx, v ->
-                    fx.set(Params.GATE_LIMIT, Tables.OUTPUT_DB_VALUES[v])
+                    fx.set(Params.GATE_LIMIT, linearX100(v))
                 },
             ),
         ),
@@ -627,6 +636,16 @@ object Catalog {
     }
 
     fun oneDecimal(v: Float) = String.format(Locale.ROOT, "%.1f", v)
+
+    /**
+     * The Master sliders store half-decibels (0.5 dB steps) so a stored value means the same
+     * gain on every install; the engine takes a linear amplitude x100. The engine clamps the
+     * result (1..400 for the output gain, 10..100 for the limiter ceiling).
+     */
+    fun linearX100(halfDb: Int): Int = (100.0 * 10.0.pow(halfDb / 40.0)).roundToInt()
+
+    /** The half-dB unit nearest a linear gain x100; only used to migrate the old table indices. */
+    fun halfDb(linear: Int): Int = (40.0 * log10(linear.coerceAtLeast(1) / 100.0)).roundToInt()
 
     private fun db(c: Context, v: Int) = c.getString(R.string.value_db_int, v)
     private fun percent(c: Context, v: Int) = c.getString(R.string.value_percent, v)

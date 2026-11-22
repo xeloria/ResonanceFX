@@ -33,17 +33,23 @@ rfx_lib_targets | while read -r libdir abi; do
 done
 say ""
 say "Effect configurations:"
-if [ -f "$RFX_STATE/configs" ]; then
+if [ -s "$RFX_STATE/configs" ]; then
     while IFS='|' read -r cfg staged; do
         if rfx_factory_matches "$cfg" "$staged"; then say "  OK      $cfg"
         elif cmp -s "$staged" "$cfg" 2>/dev/null; then say "  HIDDEN  $cfg (applied, not visible to the audio HAL)"
         else say "  MISSING $cfg"; fi
     done < "$RFX_STATE/configs"
 else
-    say "  (none recorded yet - reboot once after installing)"
+    say "  (none - no audio_effects config could be patched)"
 fi
 say ""
 say "Effect factory: $(rfx_factory_mode)"
+say "Config the framework reads:"
+for name in audio_effects.xml audio_effects_config.xml; do
+    first="$(rfx_first_config "$name")"
+    [ -n "$first" ] && say "  $first"
+done
+true
 say "Mounts:"
 mounted="$(mount 2>/dev/null | grep -E 'soundfx|audio_effects' | sed 's/^/  /')"
 if [ -n "$mounted" ]; then echo "$mounted" | while read -r l; do say "$l"; done
@@ -79,6 +85,9 @@ if [ "$aidl_missing" = "1" ]; then
 elif [ -z "$pids" ]; then
     say "Result: ⚠️ could not inspect the audio HAL from this session (private PID namespace)."
     say "Reboot so the boot-stage scripts verify and apply the mounts from init."
+elif [ ! -s "$RFX_STATE/configs" ]; then
+    say "Result: ❌ no audio effects config is installed, so the factory cannot see the engine."
+    say "Reboot once: the boot stage snapshots the ROM's configs before the module mount."
 elif ! rfx_lib_visible; then
     say "Result: ❌ the audio HAL cannot see $active."
     say "The mount is not shared with the effect process (stale bind or a private mount namespace)."

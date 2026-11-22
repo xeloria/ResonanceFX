@@ -183,6 +183,68 @@ class SettingsTest {
         assertEquals(6, Settings.fromJson(current).int("bass.gain")) // v2 passes through (0.6 dB)
     }
 
+    @Test fun migratesV2MasterSlidersFromTableIndices() {
+        val v2 = JSONObject().put("format", "resonancefx.settings.v2").put("values", JSONObject()
+            .put(Catalog.KEY_MASTER_VOLUME, 11)   // step 11 was 0.0 dB
+            .put(Catalog.KEY_MASTER_LIMIT, 5))    // step 5 was 0.0 dB
+        val s = Settings.fromJson(v2)
+        assertEquals(0, s.int(Catalog.KEY_MASTER_VOLUME))
+        assertEquals(0, s.int(Catalog.KEY_MASTER_LIMIT))
+
+        val quiet = JSONObject().put("format", "resonancefx.settings.v2").put("values", JSONObject()
+            .put(Catalog.KEY_MASTER_VOLUME, 6)    // step 6 was -6.0 dB
+            .put(Catalog.KEY_MASTER_LIMIT, 0))    // step 0 was -10.5 dB
+        val q = Settings.fromJson(quiet)
+        assertEquals(-12, q.int(Catalog.KEY_MASTER_VOLUME))
+        assertEquals(-21, q.int(Catalog.KEY_MASTER_LIMIT))
+    }
+
+    @Test fun v2MasterLabelsSurviveTheMigration() {
+        // Every old step must land within a quarter dB of the label it used to show, so an
+        // existing profile never moves audibly when it is upgraded.
+        Tables.OUTPUT_VOLUME_DB.forEachIndexed { i, label ->
+            val half = Catalog.halfDb(Tables.OUTPUT_VOLUME_VALUES[i])
+            assertTrue("volume ${Tables.OUTPUT_VOLUME_VALUES[i]} = ${half / 2f} dB, was $label dB",
+                abs(half / 2f - label.toFloat()) <= 0.25f)
+        }
+        Tables.OUTPUT_DB.forEachIndexed { i, label ->
+            val half = Catalog.halfDb(Tables.OUTPUT_DB_VALUES[i])
+            assertTrue("limit ${Tables.OUTPUT_DB_VALUES[i]} = ${half / 2f} dB, was $label dB",
+                abs(half / 2f - label.toFloat()) <= 0.25f)
+        }
+    }
+
+    @Test fun migratesV1MasterSlidersAlongsideBassGain() {
+        val v1 = JSONObject().put("values", JSONObject()
+            .put(Catalog.KEY_MASTER_VOLUME, 4)    // step 4 was -10.5 dB
+            .put(Catalog.KEY_MASTER_LIMIT, 1)     // step 1 was -6.0 dB
+            .put("bass.gain", 6))                 // step 6 was 13.0 dB
+        val s = Settings.fromJson(v1)
+        assertEquals(-21, s.int(Catalog.KEY_MASTER_VOLUME))
+        assertEquals(-12, s.int(Catalog.KEY_MASTER_LIMIT))
+        assertEquals(130, s.int("bass.gain"))
+    }
+
+    @Test fun masterSlidersMapHalfDbToTheEngineGain() {
+        assertEquals(100, Catalog.linearX100(0))
+        assertEquals(50, Catalog.linearX100(-12))
+        assertEquals(10, Catalog.linearX100(-40))
+        assertEquals(200, Catalog.linearX100(12))
+
+        assertEquals(0, Catalog.halfDb(100))
+        assertEquals(-12, Catalog.halfDb(50))
+        assertEquals(-21, Catalog.halfDb(30))
+        assertEquals(-40, Catalog.halfDb(10))
+    }
+
+    @Test fun v3RoundTripKeepsTheMasterGain() {
+        val s = Settings.DEFAULT.with(Catalog.KEY_MASTER_VOLUME, -13).with(Catalog.KEY_MASTER_LIMIT, -6)
+        val back = Settings.fromJson(JSONObject(s.toJson().toString()))
+        assertEquals(s, back)
+        assertEquals(-13, back.int(Catalog.KEY_MASTER_VOLUME))
+        assertEquals(-6, back.int(Catalog.KEY_MASTER_LIMIT))
+    }
+
     @Test fun diffListsOnlyChangedKeys() {
         val a = Settings.DEFAULT
         val b = a.with("reverb.wet", 40).with(Catalog.KEY_MASTER, true)
