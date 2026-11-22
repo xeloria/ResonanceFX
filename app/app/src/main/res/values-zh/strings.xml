@@ -256,6 +256,8 @@
     <string name="presets_applied">已应用 %1$s</string>
     <string name="presets_save_title">保存预设</string>
     <string name="presets_name">名称</string>
+    <string name="presets_delete_title">删除预设？</string>
+    <string name="presets_delete_confirm">将删除“%1$s”。此操作无法撤销。</string>
     <string name="action_save">保存</string>
     <string name="action_cancel">取消</string>
     <string name="action_close">关闭</string>

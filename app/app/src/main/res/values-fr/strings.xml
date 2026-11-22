@@ -256,6 +256,8 @@
     <string name="presets_applied">%1$s appliqué</string>
     <string name="presets_save_title">Enregistrer le préréglage</string>
     <string name="presets_name">Nom</string>
+    <string name="presets_delete_title">Supprimer le préréglage ?</string>
+    <string name="presets_delete_confirm">« %1$s » sera supprimé. Cette action est irréversible.</string>
     <string name="action_save">Enregistrer</string>
     <string name="action_cancel">Annuler</string>
     <string name="action_close">Fermer</string>

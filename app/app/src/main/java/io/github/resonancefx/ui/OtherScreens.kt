@@ -92,6 +92,7 @@ fun PresetsScreen() {
     val presets by repo.presets.collectAsStateWithLifecycle()
     var saving by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<String?>(null) }
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -137,7 +138,7 @@ fun PresetsScreen() {
                             IconButton(onClick = { exporting = name; exporter.launch("$name.json") }) {
                                 Icon(Icons.Outlined.FileUpload, contentDescription = stringResource(R.string.action_export))
                             }
-                            IconButton(onClick = { repo.deletePreset(name) }) {
+                            IconButton(onClick = { deleting = name }) {
                                 Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.action_delete))
                             }
                         }
@@ -164,6 +165,27 @@ fun PresetsScreen() {
                 }
             },
             dismissButton = { TextButton(onClick = { saving = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+
+    deleting?.let { name ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text(stringResource(R.string.presets_delete_title)) },
+            text = { Text(stringResource(R.string.presets_delete_confirm, name)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    repo.deletePreset(name)
+                    deleting = null
+                }) {
+                    Text(stringResource(R.string.action_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 }

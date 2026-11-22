@@ -256,6 +256,8 @@
     <string name="presets_applied">Se aplicó %1$s</string>
     <string name="presets_save_title">Guardar preajuste</string>
     <string name="presets_name">Nombre</string>
+    <string name="presets_delete_title">¿Eliminar el preajuste?</string>
+    <string name="presets_delete_confirm">Se eliminará «%1$s». Esta acción no se puede deshacer.</string>
     <string name="action_save">Guardar</string>
     <string name="action_cancel">Cancelar</string>
     <string name="action_close">Cerrar</string>

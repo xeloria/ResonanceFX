@@ -70,6 +70,8 @@
     <string name="presets_applied">Applied %1$s</string>
     <string name="presets_save_title">Save preset</string>
     <string name="presets_name">Name</string>
+    <string name="presets_delete_title">Delete preset?</string>
+    <string name="presets_delete_confirm">“%1$s” will be deleted. This cannot be undone.</string>
     <string name="action_save">Save</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_close">Close</string>

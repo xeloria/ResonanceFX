@@ -256,6 +256,8 @@
     <string name="presets_applied">%1$s を適用しました</string>
     <string name="presets_save_title">プリセットを保存</string>
     <string name="presets_name">名前</string>
+    <string name="presets_delete_title">プリセットを削除しますか？</string>
+    <string name="presets_delete_confirm">「%1$s」を削除します。元に戻せません。</string>
     <string name="action_save">保存</string>
     <string name="action_cancel">キャンセル</string>
     <string name="action_close">閉じる</string>

@@ -256,6 +256,8 @@
     <string name="presets_applied">Применён %1$s</string>
     <string name="presets_save_title">Сохранить пресет</string>
     <string name="presets_name">Название</string>
+    <string name="presets_delete_title">Удалить пресет?</string>
+    <string name="presets_delete_confirm">«%1$s» будет удалён. Это нельзя отменить.</string>
     <string name="action_save">Сохранить</string>
     <string name="action_cancel">Отмена</string>
     <string name="action_close">Закрыть</string>
