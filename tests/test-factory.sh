@@ -78,6 +78,25 @@ check "aidl lib: exact match wins" libresonancefx_aidl_36.so \
 check "aidl lib: too-new build ignored" "" \
     "$(run "MODDIR='$SANDBOX/mod-multi'; RFX_TEST_API=34; $selector")"
 
+# The AIDL build must not be visible in /vendor: an APEX-hosted effect HAL permits /system/lib64
+# but not /vendor/lib64, and the AOSP factory picks /vendor first.
+check "aidl install partition" /system \
+    "$(run "rfx_api() { echo 37; }; rfx_lib_partitions_for libresonancefx_aidl_36.so")"
+check "legacy install partition" /vendor \
+    "$(run "rfx_api() { echo 37; }; rfx_lib_partitions_for libresonancefx.so")"
+
+stage="$SANDBOX/stage"
+mkdir -p "$stage/engine/arm64-v8a"
+: > "$stage/engine/arm64-v8a/libresonancefx.so"
+: > "$stage/engine/arm64-v8a/libresonancefx_aidl_36.so"
+run "MODDIR='$stage'; rfx_lib_targets() { echo 'lib64 arm64-v8a'; }; rfx_api() { echo 37; }; rfx_stage_libraries" 2>/dev/null
+check "stage: legacy goes to vendor" 1 \
+    "$([ -f "$stage/system/vendor/lib64/soundfx/libresonancefx.so" ] && echo 1 || echo 0)"
+check "stage: AIDL goes to system" 1 \
+    "$([ -f "$stage/system/lib64/soundfx/libresonancefx_aidl_36.so" ] && echo 1 || echo 0)"
+check "stage: AIDL not in vendor" 0 \
+    "$([ -f "$stage/system/vendor/lib64/soundfx/libresonancefx_aidl_36.so" ] && echo 1 || echo 0)"
+
 # ---- entry shape ----------------------------------------------------------------------------
 
 src="$ROOT/tests/fixtures/aosp_aidl_audio_effects_config.xml"

@@ -146,6 +146,9 @@ rfx_is_aidl_config() {
 # The ABI whose engine is installed (the 64-bit one when the device has both).
 rfx_primary_abi() { rfx_lib_targets | awk 'NR == 1 { print $2 }'; }
 
+# The lib directory of the primary ABI (lib64 or lib).
+rfx_primary_libdir() { rfx_lib_targets | awk 'NR == 1 { print $1 }'; }
+
 # The AIDL engine packaged for this platform, if any. Builds are named after the Android
 # release they were compiled against (<name>_<api>.so), but the AIDL interface library is
 # frozen and stays on newer releases, so a build for an older API keeps working on a newer
@@ -286,12 +289,24 @@ rfx_lib_targets() {
     esac
 }
 
-# Partitions an effect library may be loaded from. The audio HAL (Android 8+) lives in the
-# vendor linker namespace and can only dlopen from /vendor or /odm; audioserver on older
-# releases loads from /system. We install to /vendor and /system on every device.
+# Partitions a legacy effect library may be loaded from. The audio HAL (Android 8+) lives in
+# the vendor linker namespace and can dlopen from /vendor or /odm; audioserver on older
+# releases loads from /system.
 rfx_lib_partitions() {
     echo /vendor
     [ "$(rfx_api)" -lt 26 ] && echo /system
+    true
+}
+
+# Partitions a given engine build may be installed to. The AIDL build goes to /system only:
+# an APEX-hosted AIDL effect HAL permits /system/lib64 but not /vendor/lib64, and the AOSP
+# factory searches /odm, /vendor and /system in that order, so a vendor copy would be found
+# first and then rejected by the linker namespace.
+rfx_lib_partitions_for() {
+    case "$1" in
+        libresonancefx_aidl*) echo /system ;;
+        *) rfx_lib_partitions ;;
+    esac
     true
 }
 
@@ -472,33 +487,48 @@ rfx_patch_any() {
 
 # Copies the right engine build into every soundfx directory the module overlays.
 # Engine builds live in $MODDIR/engine/<abi>/libresonancefx.so (legacy AELI ABI) and, when the
-# AIDL front-end is built, $MODDIR/engine/<abi>/libresonancefx_aidl.so.
+# AIDL front-end is built, $MODDIR/engine/<abi>/libresonancefx_aidl*.so.
 rfx_stage_libraries() {
-    # Copies from older versions that still targeted /system on Android 8+.
-    [ "$(rfx_api)" -ge 26 ] && rm -rf "$MODDIR/system/lib/soundfx" "$MODDIR/system/lib64/soundfx"
     rfx_lib_targets | while read -r libdir abi; do
         srcLib="$MODDIR/engine/$abi/$RFX_LIB"
         if [ ! -f "$srcLib" ]; then
             rfx_log "missing engine build for $abi"
             continue
         fi
-        for part in $(rfx_lib_partitions); do
+        # Drop builds that do not belong here, including ones an older module version staged:
+        # the AIDL build must not be visible in /vendor (the factory would pick it first and
+        # the HAL's namespace would reject it), and the legacy build is not used from /system
+        # on Android 8+.
+        for d in "$MODDIR/system/vendor/$libdir/soundfx" "$MODDIR/system/$libdir/soundfx"; do
+            [ -d "$d" ] || continue
+            rm -f "$d"/libresonancefx_aidl*.so
+            [ "$(rfx_api)" -ge 26 ] && rm -f "$d/$RFX_LIB"
+        done
+
+        for part in $(rfx_lib_partitions_for "$RFX_LIB"); do
             case "$part" in
                 /vendor) dir="$MODDIR/system/vendor/$libdir/soundfx" ;;
                 *) dir="$MODDIR/system/$libdir/soundfx" ;;
             esac
             mkdir -p "$dir"
             chmod 0755 "$dir"
-            # Every engine build shipped for this ABI (legacy AELI, and the AIDL build, which may
-            # carry a platform-versioned name).
-            for src in "$MODDIR/engine/$abi"/*.so; do
-                [ -f "$src" ] || continue
-                name="${src##*/}"
-                cp -f "$src" "$dir/$name"
-                chmod 0644 "$dir/$name"
-                chcon "$(rfx_lib_context "$part/")" "$dir/$name" 2>/dev/null
-                rfx_log "staged $abi -> $part/$libdir/soundfx/$name"
-            done
+            cp -f "$srcLib" "$dir/$RFX_LIB"
+            chmod 0644 "$dir/$RFX_LIB"
+            chcon "$(rfx_lib_context "$part/")" "$dir/$RFX_LIB" 2>/dev/null
+            rfx_log "staged $abi -> $part/$libdir/soundfx/$RFX_LIB"
+        done
+
+        # The AIDL front-end goes to /system, where an APEX-hosted effect HAL can reach it.
+        for src in "$MODDIR/engine/$abi"/libresonancefx_aidl*.so; do
+            [ -f "$src" ] || continue
+            name="${src##*/}"
+            dir="$MODDIR/system/$libdir/soundfx"
+            mkdir -p "$dir"
+            chmod 0755 "$dir"
+            cp -f "$src" "$dir/$name"
+            chmod 0644 "$dir/$name"
+            chcon "$(rfx_lib_context "/system/")" "$dir/$name" 2>/dev/null
+            rfx_log "staged $abi -> /system/$libdir/soundfx/$name"
         done
     done
 }
@@ -563,9 +593,14 @@ rfx_lib_visible() {
     # True when the process that loads effects (not just this shell) can reach the library.
     ok=0
     name="$(rfx_active_lib)"
-    for pair in $(rfx_lib_targets | tr ' ' ':'); do
-        libdir="${pair%%:*}"
-        rfx_factory_sees "/vendor/$libdir/soundfx/$name" || ok=1
+    case "$name" in
+        libresonancefx_aidl*) libdirs="$(rfx_primary_libdir)" ;;
+        *) libdirs="$(rfx_lib_targets | awk '{ print $1 }')" ;;
+    esac
+    for libdir in $libdirs; do
+        for part in $(rfx_lib_partitions_for "$name"); do
+            rfx_factory_sees "$part/$libdir/soundfx/$name" || ok=1
+        done
     done
     return $ok
 }
@@ -574,8 +609,12 @@ rfx_lib_visible() {
 # the root implementation didn't overlay /vendor (e.g. KernelSU on some Samsung firmware).
 rfx_bind_libraries() {
     active="$(rfx_active_lib)"
+    primary="$(rfx_primary_libdir)"
     rfx_lib_targets | while read -r libdir abi; do
-        for part in $(rfx_lib_partitions); do
+        case "$active" in
+            libresonancefx_aidl*) [ "$libdir" = "$primary" ] || continue ;;
+        esac
+        for part in $(rfx_lib_partitions_for "$active"); do
             target="$part/$libdir/soundfx"
             rfx_factory_sees "$target/$active" && continue
             [ -d "$target" ] || continue
@@ -590,13 +629,12 @@ rfx_bind_libraries() {
                 chmod 0644 "$stage/${f##*/}"
                 chcon "$(rfx_context_of "$f")" "$stage/${f##*/}" 2>/dev/null
             done
-            for lib in "$MODDIR/engine/$abi"/*.so; do
-                [ -f "$lib" ] || continue
-                name="${lib##*/}"
-                cp -f "$lib" "$stage/$name"
-                chmod 0644 "$stage/$name"
-                chcon "$(rfx_lib_context "$target/")" "$stage/$name" 2>/dev/null
-            done
+            lib="$MODDIR/engine/$abi/$active"
+            if [ -f "$lib" ]; then
+                cp -f "$lib" "$stage/$active"
+                chmod 0644 "$stage/$active"
+                chcon "$(rfx_lib_context "$target/")" "$stage/$active" 2>/dev/null
+            fi
             chmod 0755 "$stage"
             chcon "$(rfx_context_of "$target")" "$stage" 2>/dev/null
             # Drop every layer left by an earlier pass or an earlier module version, then bind.
@@ -649,20 +687,23 @@ rfx_configs_missing() {
 # (EBUSY), so an updated engine is swapped into the bind source instead: the mounted view
 # changes immediately, the old inode stays valid for the running HAL until it restarts.
 rfx_refresh_bound_libraries() {
+    active="$(rfx_active_lib)"
+    primary="$(rfx_primary_libdir)"
     rfx_lib_targets | while read -r libdir abi; do
-        for part in $(rfx_lib_partitions); do
+        case "$active" in
+            libresonancefx_aidl*) [ "$libdir" = "$primary" ] || continue ;;
+        esac
+        for part in $(rfx_lib_partitions_for "$active"); do
             target="$part/$libdir/soundfx"
             stage="$RFX_STAGE/$(echo "$target" | sed 's|/|_|g')"
-            for lib in "$MODDIR/engine/$abi"/*.so; do
-                [ -f "$lib" ] || continue
-                name="${lib##*/}"
-                [ -f "$stage/$name" ] || continue
-                cmp -s "$lib" "$target/$name" && continue
-                cp -f "$lib" "$stage/.$name.new" &&
-                    chmod 0644 "$stage/.$name.new" &&
-                    chcon "$(rfx_lib_context "$target/")" "$stage/.$name.new" 2>/dev/null
-                mv -f "$stage/.$name.new" "$stage/$name" && rfx_log "refreshed engine in $target"
-            done
+            lib="$MODDIR/engine/$abi/$active"
+            [ -f "$lib" ] || continue
+            [ -f "$stage/$active" ] || continue
+            cmp -s "$lib" "$target/$active" && continue
+            cp -f "$lib" "$stage/.$active.new" &&
+                chmod 0644 "$stage/.$active.new" &&
+                chcon "$(rfx_lib_context "$target/")" "$stage/.$active.new" 2>/dev/null
+            mv -f "$stage/.$active.new" "$stage/$active" && rfx_log "refreshed engine in $target"
         done
     done
 }
@@ -690,7 +731,7 @@ rfx_unmount_all() {
         fi
         for pair in $(rfx_lib_targets | tr ' ' ':'); do
             libdir="${pair%%:*}"
-            for part in $(rfx_lib_partitions); do rfx_drain_mount "$part/$libdir/soundfx"; done
+            for part in /vendor /system; do rfx_drain_mount "$part/$libdir/soundfx"; done
         done
     done
 }
