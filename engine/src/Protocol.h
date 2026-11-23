@@ -64,6 +64,7 @@ enum Feature : uint32_t {
     kFeatureAbx = 1u << 15,          // blind listening test (kAbx*)
     kFeatureMeasuredProtection = 1u << 16,  // kSpeakerProtectCeilings / kSpeakerProtectMode
     kFeatureHeadOrientation = 1u << 17,     // kSpatialOrientation (full 3DoF tracking)
+    kFeatureStereoWidener = 1u << 18,       // kStereoWidener* (mid/side delay, split out of kDiffSurround*)
 };
 
 // ---- Housekeeping -----------------------------------------------------------------------------
@@ -101,13 +102,21 @@ enum Param : int32_t {
     kFieldSurroundMidImage = 65555,  // 100..200 -> mid level 0..100 %
     kFieldSurroundDepth = 65556,     // 200..800 -> side widening 0..1 (up to x2.5 = +8 dB)
 
-    // Differential surround (Haas effect).
-    // Uses Mid/Side separation to delay only the side signal, preserving the centre image.
+    // Differential surround (precedence effect): delays the right channel by 1..20 ms, fully wet by
+    // default like the original. The mix softens the image shift and the mono comb at the nulls.
     kDiffSurroundEnable = 65557,
     kDiffSurroundDelay = 65558,      // 100..2000 -> 1..20 ms
-    kDiffSurroundWidth = 65590,      // 0..200 -> 0.0..2.0 width multiplier
-    kDiffSurroundHighpass = 65591,   // 80..250 Hz high-pass cutoff for the side signal
-    kDiffSurroundProtect = 65592,    // 0 or 1: dynamic mono protection
+    kDiffSurroundMix = 65590,        // 0..100 -> 0.0..1.0 wet/dry (was the width multiplier)
+    kDiffSurroundHighpass = 65591,   // reserved: the delay is full band
+    kDiffSurroundProtect = 65592,    // reserved: the delay has no mono protection
+
+    // Stereo widening: delays the side signal symmetrically, so the image widens around a centre
+    // that stays put (inter-aural time difference ≈ 0).
+    kStereoWidenerEnable = 65593,
+    kStereoWidenerDelay = 65594,     // 100..2000 -> 1..20 ms
+    kStereoWidenerWidth = 65595,     // 0..200 -> 0.0..2.0 side gain
+    kStereoWidenerHighpass = 65596,  // 80..250 Hz, 24 dB/oct high-pass for the side signal
+    kStereoWidenerProtect = 65597,   // 0 or 1: dynamic mono protection
 
     kReverbEnable = 65559,
     kReverbRoomSize = 65560,  // 0..100

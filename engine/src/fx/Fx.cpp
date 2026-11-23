@@ -133,9 +133,9 @@ void FieldSurround::process(float* left, float* right, int n) {
     }
 }
 
-// ---- HaasDelay ----------------------------------------------------------------------------------
+// ---- StereoWidener ------------------------------------------------------------------------------
 
-void HaasDelay::prepare(double sampleRate) {
+void StereoWidener::prepare(double sampleRate) {
     fs_ = sampleRate;
     buf_.assign(static_cast<size_t>(std::ceil(0.021 * fs_)) + 1, 0.0f);
     pos_ = 0;
@@ -154,10 +154,11 @@ void HaasDelay::prepare(double sampleRate) {
     dipTotal_ = 0;
 }
 
-void HaasDelay::reset() {
+void StereoWidener::reset() {
     std::fill(buf_.begin(), buf_.end(), 0.0f);
     pos_ = 0;
-    hpState_.reset();
+    hpState1_.reset();
+    hpState2_.reset();
     lfoPhase_ = 0.0;
     midEnv_ = 0.0f;
     sideEnv_ = 0.0f;
@@ -177,7 +178,7 @@ void HaasDelay::reset() {
     widthStep_ = 0.0f;
 }
 
-void HaasDelay::setDelayMs(float ms) {
+void StereoWidener::setDelayMs(float ms) {
     targetDelayMs_ = clampv(ms, 0.0f, 20.0f);
 
     const int want = std::min(static_cast<int>(std::lround(targetDelayMs_ * fs_ / 1000.0)),
@@ -196,7 +197,7 @@ void HaasDelay::setDelayMs(float ms) {
     dipTotal_ = dipRemaining_ = std::max(64, static_cast<int>(0.006 * fs_));
 }
 
-void HaasDelay::setWidth(float width) {
+void StereoWidener::setWidth(float width) {
     width_ = clampv(width, 0.0f, 2.0f);
     if (std::fabs(width_ - widthCurrent_) < 1e-4f) {
         widthCurrent_ = width_;
@@ -208,16 +209,22 @@ void HaasDelay::setWidth(float width) {
     }
 }
 
-void HaasDelay::setHighpassHz(float hz) {
+void StereoWidener::setHighpassHz(float hz) {
     hpHz_ = clampv(hz, 80.0f, 250.0f);
-    hpCoeffs_ = designRbj(FilterType::HighPass, hpHz_, 0.0, 0.7071, fs_);
+    // 24 dB/oct (4th-order Butterworth) as two cascaded second-order sections, so the corner
+    // frequency stays the -3 dB point and the low side content is rejected harder.
+    double qs[2] = {};
+    bool hasFirstOrder = false;
+    butterworthQs(4, qs, &hasFirstOrder);
+    hpCoeffs1_ = designRbj(FilterType::HighPass, hpHz_, 0.0, static_cast<float>(qs[0]), fs_);
+    hpCoeffs2_ = designRbj(FilterType::HighPass, hpHz_, 0.0, static_cast<float>(qs[1]), fs_);
 }
 
-void HaasDelay::setMonoProtection(bool enabled) {
+void StereoWidener::setMonoProtection(bool enabled) {
     monoProtectEnabled_ = enabled;
 }
 
-void HaasDelay::process(float* left, float* right, int n) {
+void StereoWidener::process(float* left, float* right, int n) {
     if (delay_ <= 0 && dipRemaining_ <= 0 && pendingDelayMs_ < 0.0f) return;
     if (buf_.empty()) return;
 
@@ -228,7 +235,8 @@ void HaasDelay::process(float* left, float* right, int n) {
         const float mid = (left[i] + right[i]) * 0.5f;
         float side = (left[i] - right[i]) * 0.5f;
 
-        side = static_cast<float>(biquadTick(hpCoeffs_, hpState_, side));
+        side = static_cast<float>(biquadTick(hpCoeffs1_, hpState1_, side));
+        side = static_cast<float>(biquadTick(hpCoeffs2_, hpState2_, side));
 
         if (monoProtectEnabled_) {
             if (++envCounter_ >= 64) {
@@ -296,6 +304,147 @@ void HaasDelay::process(float* left, float* right, int n) {
         const float finalSide = (side * (1.0f - monoFactor_) + delayedSide * monoFactor_) * widthCurrent_;
         left[i] = mid + finalSide;
         right[i] = mid - finalSide;
+    }
+}
+
+// ---- HaasDelay ----------------------------------------------------------------------------------
+
+int HaasDelay::delaySamples(float ms) const {
+    // The tap interpolates two samples past its read position and the LFO swings that position by
+    // ±0.05 ms, so the delay must stay further ahead of the write pointer than that to stay causal.
+    const int guard = 3 + static_cast<int>(std::ceil(0.05 * fs_ / 1000.0));
+    const int maxSamples = static_cast<int>(buf_.size()) - 1;
+    if (maxSamples < 1) return guard;
+    const int want = static_cast<int>(std::lround(clampv(ms, 1.0f, 20.0f) * fs_ / 1000.0));
+    return std::max(guard, std::min(want, maxSamples));
+}
+
+void HaasDelay::prepare(double sampleRate) {
+    fs_ = sampleRate;
+    buf_.assign(static_cast<size_t>(std::ceil(0.021 * fs_)) + 1, 0.0f);
+    pos_ = 0;
+
+    lfoInc_ = 0.1 / fs_;
+    lfoPhase_ = 0.0;
+
+    // Re-align the delay for the new rate without losing the configured value.
+    delay_ = newDelay_ = delaySamples(targetDelayMs_);
+    xfadeRemaining_ = 0;
+    xfadeTotal_ = 0;
+    pendingDelayMs_ = -1.0f;
+
+    mixCurrent_ = mix_;
+    mixRampRemaining_ = 0;
+    mixStep_ = 0.0f;
+}
+
+void HaasDelay::reset() {
+    std::fill(buf_.begin(), buf_.end(), 0.0f);
+    pos_ = 0;
+    lfoPhase_ = 0.0;
+
+    // Re-align the delay and clear transition state so nothing lingers after a reset.
+    delay_ = newDelay_ = delaySamples(targetDelayMs_);
+    xfadeRemaining_ = 0;
+    xfadeTotal_ = 0;
+    pendingDelayMs_ = -1.0f;
+
+    mixCurrent_ = mix_;
+    mixRampRemaining_ = 0;
+    mixStep_ = 0.0f;
+}
+
+void HaasDelay::setDelayMs(float ms) {
+    // 1 ms keeps the read position behind the write pointer even at the LFO's negative peak.
+    targetDelayMs_ = clampv(ms, 1.0f, 20.0f);
+
+    if (xfadeRemaining_ > 0) {
+        // A drag re-arms the pending value instead of stacking fades.
+        pendingDelayMs_ = targetDelayMs_;
+        return;
+    }
+    pendingDelayMs_ = -1.0f;
+
+    const int want = delaySamples(targetDelayMs_);
+    if (want == delay_) return;
+    newDelay_ = want;
+    xfadeTotal_ = xfadeRemaining_ = std::max(64, static_cast<int>(0.010 * fs_));
+}
+
+void HaasDelay::setMix(float mix) {
+    mix_ = clampv(mix, 0.0f, 1.0f);
+    if (std::fabs(mix_ - mixCurrent_) < 1e-4f) {
+        mixCurrent_ = mix_;
+        mixRampRemaining_ = 0;
+        mixStep_ = 0.0f;
+    } else {
+        mixRampRemaining_ = std::max(1, static_cast<int>(std::lround(0.020 * fs_)));
+        mixStep_ = (mix_ - mixCurrent_) / static_cast<float>(mixRampRemaining_);
+    }
+}
+
+void HaasDelay::process(float* left, float* right, int n) {
+    (void) left;
+    if (buf_.empty() || delay_ <= 0) return;
+
+    const int size = static_cast<int>(buf_.size());
+    const double lfoDepthSamples = 0.05 * fs_ / 1000.0;
+
+    // Catmull-Rom read of `delaySamples` behind the write pointer, so a delay change can fade
+    // between two arbitrary taps without an integer step being audible.
+    auto tap = [&](int delaySamples, double lfoOffset) {
+        double readPos = double(pos_) - double(delaySamples) - lfoOffset;
+        readPos = std::fmod(readPos, double(size));
+        if (readPos < 0.0) readPos += double(size);
+        const int i1 = static_cast<int>(readPos);
+        const double frac = readPos - double(i1);
+        const int i0 = (i1 - 1 + size) % size;
+        const int i2 = (i1 + 1) % size;
+        const int i3 = (i1 + 2) % size;
+        const double c0 = buf_[i1];
+        const double c1 = 0.5 * (buf_[i2] - buf_[i0]);
+        const double c2 = buf_[i0] - 2.5 * buf_[i1] + 2.0 * buf_[i2] - 0.5 * buf_[i3];
+        const double c3 = 0.5 * (buf_[i3] - buf_[i0]) + 1.5 * (buf_[i1] - buf_[i2]);
+        return static_cast<float>(c0 + frac * (c1 + frac * (c2 + frac * c3)));
+    };
+
+    for (int i = 0; i < n; ++i) {
+        // The whole right channel goes through the delay line; the left one is the reference and
+        // is never touched.
+        const float dry = right[i];
+        buf_[pos_] = dry;
+        const double lfoOffset = lfoDepthSamples * std::sin(lfoPhase_);
+        lfoPhase_ += lfoInc_;
+        if (lfoPhase_ >= kTwoPi) lfoPhase_ -= kTwoPi;
+
+        float delayed = tap(delay_, lfoOffset);
+        if (xfadeRemaining_ > 0) {
+            const float env = 1.0f - static_cast<float>(xfadeRemaining_) / static_cast<float>(xfadeTotal_);
+            delayed += (tap(newDelay_, lfoOffset) - delayed) * env;
+            if (--xfadeRemaining_ == 0) {
+                delay_ = newDelay_;
+                xfadeTotal_ = 0;
+            }
+        }
+
+        if (++pos_ == size) pos_ = 0;
+
+        // A change that arrived while the previous one was still fading starts only now, so the
+        // two fades never overlap and the read position stays monotonic.
+        if (xfadeRemaining_ == 0 && pendingDelayMs_ >= 0.0f) {
+            const float pending = pendingDelayMs_;
+            pendingDelayMs_ = -1.0f;
+            setDelayMs(pending);
+        }
+
+        if (mixRampRemaining_ > 0) {
+            mixCurrent_ += mixStep_;
+            --mixRampRemaining_;
+        } else {
+            mixCurrent_ = mix_;
+        }
+
+        right[i] = dry * (1.0f - mixCurrent_) + delayed * mixCurrent_;
     }
 }
 

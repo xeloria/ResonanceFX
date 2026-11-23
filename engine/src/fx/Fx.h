@@ -55,9 +55,9 @@ private:
     BiquadCoeffs hp_;
 };
 
-/// Precedence-effect (Haas) spaciousness: delays the side channel to widen the stereo image.
-/// Uses Mid/Side separation to preserve the centre image and adds safety mechanisms.
-class HaasDelay {
+/// Mid/side delay widener: delays the side signal by 1-20 ms, widening the image while the
+/// centre stays put. The side band is high-passed so bass stays centred and mono-compatible.
+class StereoWidener {
 public:
     void prepare(double sampleRate);
     void reset();
@@ -97,8 +97,9 @@ private:
     float hpHz_ = 120.0f;
     bool monoProtectEnabled_ = true;
 
-    BiquadCoeffs hpCoeffs_;
-    BiquadState hpState_;
+    // 24 dB/oct high-pass: two cascaded second-order sections.
+    BiquadCoeffs hpCoeffs1_, hpCoeffs2_;
+    BiquadState hpState1_, hpState2_;
 
     double lfoPhase_ = 0.0;
     double lfoInc_ = 0.0;
@@ -110,6 +111,53 @@ private:
     int envCounter_ = 0;
     bool isMonoActive_ = false;
     float monoFactor_ = 1.0f;
+};
+
+/// Precedence-effect (Haas) spaciousness: delays the right channel by 1-20 ms, so the ear hears
+/// one source pulled towards the earlier side. Fully wet by default, as the original implementation
+/// was: that is the classic setup and the only setting that keeps the right channel's level flat,
+/// but the direct sound then exists on one side only, which on closely spaced speakers reads as a
+/// hard shift, and the mono sum cancels where the comb nulls fall (100, 300 Hz...). The mix control
+/// is there to soften either.
+class HaasDelay {
+public:
+    void prepare(double sampleRate);
+    void reset();
+
+    /// Sets the delay time in milliseconds (1-20 ms).
+    void setDelayMs(float ms);
+
+    /// Sets the wet/dry mix (0 = right channel untouched, 1 = fully delayed).
+    void setMix(float mix);
+
+    void process(float* left, float* right, int n);
+
+private:
+    /// Samples for `ms`, clamped so the read tap always stays behind the write pointer.
+    int delaySamples(float ms) const;
+    double fs_ = 48000.0;
+    std::vector<float> buf_;
+    // `targetDelayMs_` and `pendingDelayMs_` are milliseconds, the unit the UI and the presets
+    // use; `delay_` and `newDelay_` are sample counts at the current rate.
+    int pos_ = 0, delay_ = 0;
+    // A delay change reads both taps and crossfades between them, so the delayed band never drops
+    // out and the slider can be dragged without clicks. `newDelay_` is the tap being faded in.
+    int newDelay_ = 0;
+    int xfadeRemaining_ = 0, xfadeTotal_ = 0;
+    float pendingDelayMs_ = -1.0f;
+
+    // Target delay in milliseconds, preserved across sample rate changes.
+    float targetDelayMs_ = 5.0f;
+
+    // Wet/dry mix: fully wet by default, as the original implementation was. Lower values soften
+    // the image shift and the mono comb, at the cost of a level that depends on frequency.
+    float mix_ = 1.0f;           // target mix from the UI
+    float mixCurrent_ = 1.0f;    // smoothed mix used in the DSP
+    float mixStep_ = 0.0f;       // constant step per sample to reach the target
+    int mixRampRemaining_ = 0;   // samples remaining in the ramp
+
+    double lfoPhase_ = 0.0;
+    double lfoInc_ = 0.0;
 };
 
 /// Dynamic bass: a low shelf whose boost rises when the programme is light on bass and backs

@@ -93,6 +93,7 @@ void Engine::prepare(double sampleRate) {
     mbc_.prepare(fs_);
     field_.prepare(fs_);
     haas_.prepare(fs_);
+    stereoWidener_.prepare(fs_);
     cure_.prepare(fs_);
     hrtf_.prepare(fs_);
     reverb_.prepare(fs_);
@@ -120,6 +121,7 @@ void Engine::prepare(double sampleRate) {
         limiter_.set(ls);
     }
     haas_.setDelayMs(haasMs_);
+    stereoWidener_.setDelayMs(stereoWidenerMs_);
     analog_.setLevel(analogLevel_);
     dyn_.set(dynSettings_);
     deess_.set(deessSettings_);
@@ -153,8 +155,8 @@ void Engine::prepare(double sampleRate) {
 void Engine::reset(bool full) {
     for (Stage* st : {&stDdc_, &stAutoEq_, &stConv_, &stUserEq_, &stLegacyEq_, &stGeq_, &stLoud_, &stDeq_, &stDeess_,
                       &stVocal_, &stVse_, &stBass_, &stDyn_, &stClarity_, &stTube_, &stAnalog_, &stComp_, &stMbc_,
-                      &stField_, &stHaas_, &stCure_, &stHrtf_, &stReverb_, &stXtc_, &stSpeaker_, &stAgc_,
-                      &stProtect_}) {
+                      &stField_, &stHaas_, &stStereoWidener_, &stCure_, &stHrtf_, &stReverb_, &stXtc_,
+                      &stSpeaker_, &stAgc_, &stProtect_}) {
         st->mix = st->target ? 1.0f : 0.0f;
         releaseAlign(*st);  // dry history never survives a stream reset
     }
@@ -176,6 +178,7 @@ void Engine::reset(bool full) {
     mbc_.reset();
     field_.reset();
     haas_.reset();
+    stereoWidener_.reset();
     cure_.reset();
     hrtf_.reset();
     reverb_.reset();
@@ -299,19 +302,34 @@ int Engine::setInts(int32_t id, const int32_t* v, int count) {
             haas_.setDelayMs(haasMs_);
             return 0;
 
-        case kDiffSurroundWidth:
+        case kDiffSurroundMix:
+            // UI sends 0..100, convert to a 0.0..1.0 wet/dry mix.
+            haas_.setMix(clampv(a, 0, 100) / 100.0f);
+            return 0;
+
+        case kStereoWidenerEnable:
+            stStereoWidener_.target = on;
+            return 0;
+
+        case kStereoWidenerDelay:
+            // UI sends 100..2000, convert to 1.0..20.0 ms.
+            stereoWidenerMs_ = clampv(a, 100, 2000) / 100.0f;
+            stereoWidener_.setDelayMs(stereoWidenerMs_);
+            return 0;
+
+        case kStereoWidenerWidth:
             // UI sends 0..200, convert to a 0.0..2.0 gain multiplier.
-            haas_.setWidth(clampv(a, 0, 200) / 100.0f);
+            stereoWidener_.setWidth(clampv(a, 0, 200) / 100.0f);
             return 0;
 
-        case kDiffSurroundHighpass:
+        case kStereoWidenerHighpass:
             // UI sends 80..250 Hz.
-            haas_.setHighpassHz(static_cast<float>(clampv(a, 80, 250)));
+            stereoWidener_.setHighpassHz(static_cast<float>(clampv(a, 80, 250)));
             return 0;
 
-        case kDiffSurroundProtect:
+        case kStereoWidenerProtect:
             // UI sends 0 (off) or 1 (on).
-            haas_.setMonoProtection(on);
+            stereoWidener_.setMonoProtection(on);
             return 0;
 
         case kReverbEnable: stReverb_.target = on; return 0;
@@ -1115,6 +1133,7 @@ void Engine::processModules(float* l, float* r, int n) {
     run(stMbc_, l, r, n, 0, [&](float* a, float* b, int m) { mbc_.process(a, b, m); }, [&] { mbc_.reset(); });
     run(stField_, l, r, n, 0, [&](float* a, float* b, int m) { field_.process(a, b, m); }, [&] { field_.reset(); });
     run(stHaas_, l, r, n, 0, [&](float* a, float* b, int m) { haas_.process(a, b, m); }, [&] { haas_.reset(); });
+    run(stStereoWidener_, l, r, n, 0, [&](float* a, float* b, int m) { stereoWidener_.process(a, b, m); }, [&] { stereoWidener_.reset(); });
     run(stCure_, l, r, n, 0, [&](float* a, float* b, int m) { cure_.process(a, b, m); }, [&] { cure_.reset(); });
     run(stHrtf_, l, r, n, 0,
         [&](float* a, float* b, int m) {

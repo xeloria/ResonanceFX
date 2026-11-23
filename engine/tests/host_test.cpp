@@ -972,6 +972,204 @@ static void testHeadOrientationParam() {
     CHECK(fx.setParam(kSpatialOrientation, bad, sizeof(bad)) != 0, "short orientation payload rejected");
 }
 
+// ---- Haas (precedence delay) and the mid/side widener -------------------------------------------
+
+/// Runs an interleaved stereo buffer through the engine and returns the output.
+static std::vector<float> runStereo(Fx &fx, std::vector<float> &in, size_t frames) {
+    std::vector<float> out(in.size(), 0.0f);
+    for (size_t at = 0; at < frames; at += 512) {
+        size_t n = frames - at;
+        if (n > 512) n = 512;
+        audio_buffer_t ib{n, {in.data() + at * 2}};
+        audio_buffer_t ob{n, {out.data() + at * 2}};
+        CHECK(fx.process(&ib, &ob) == 0, "stereo process");
+    }
+    return out;
+}
+
+/// Mono-sum energy (dB) of an interleaved stereo buffer, from `fromFrames` on.
+static double monoSumDb(const std::vector<float> &x, size_t fromFrames) {
+    double sum = 0.0;
+    size_t n = 0;
+    for (size_t i = fromFrames; i * 2 + 1 < x.size(); i++) {
+        const double m = 0.5 * ((double) x[i * 2] + (double) x[i * 2 + 1]);
+        sum += m * m;
+        n++;
+    }
+    if (n == 0 || sum <= 0.0) return -200.0;
+    return 10.0 * std::log10(sum / (double) n);
+}
+
+/// Interleaved stereo sine with identical channels. The shared `sine()` offsets the second
+/// channel by one radian, which is what a decorrelated test wants but not what a mono sum needs.
+static std::vector<float> monoSine(size_t frames, float hz, float amp) {
+    std::vector<float> v(frames * 2);
+    for (size_t i = 0; i < frames; i++) {
+        const float s = amp * sinf((float) (2.0 * M_PI * (double) hz * (double) i / 48000.0));
+        v[i * 2] = v[i * 2 + 1] = s;
+    }
+    return v;
+}
+
+/// Runs an interleaved stereo buffer through the engine with the Haas delay on or off. Every test
+/// below compares against the off run rather than the raw input: the engine buffers internally, so
+/// its own latency would otherwise show up as a phase shift.
+static std::vector<float> haasProcess(std::vector<float> in, size_t frames, int mixPercent, int delayX100,
+                                      bool enabled = true) {
+    Fx fx;
+    fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+    fx.simple(EFFECT_CMD_ENABLE);
+    fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+    fx.set(PARAM_GATE_LIMIT, {100});
+    if (enabled) {
+        fx.set(kDiffSurroundDelay, {delayX100});
+        fx.set(kDiffSurroundMix, {mixPercent});
+        fx.set(kDiffSurroundEnable, {1});
+    }
+    return runStereo(fx, in, frames);
+}
+
+/// Largest sample difference between two runs, in one channel (0 = left, 1 = right), from
+/// `fromFrames` on.
+static double maxDiff(const std::vector<float> &a, const std::vector<float> &b, size_t fromFrames, int channel) {
+    double err = 0.0;
+    for (size_t i = fromFrames; i * 2 + 1 < a.size(); i++)
+        err = std::max(err, fabs((double) a[i * 2 + channel] - (double) b[i * 2 + channel]));
+    return err;
+}
+
+static void testHaasMixZeroIsIdentity() {
+    const size_t frames = 48000;
+    std::vector<float> in(frames * 2);
+    uint32_t seed = 12345;
+    for (size_t i = 0; i < frames; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        const float v = 0.25f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+        in[i * 2] = v;
+        in[i * 2 + 1] = 0.5f * v;
+    }
+    const std::vector<float> wet = haasProcess(in, frames, 0, 500, true);
+    const std::vector<float> dry = haasProcess(in, frames, 0, 500, false);
+    for (int ch = 0; ch < 2; ch++) {
+        const double err = maxDiff(wet, dry, frames / 2, ch);
+        CHECK(err < 1e-5, "haas at mix 0 changed channel %d by %g", ch, err);
+    }
+}
+
+static void testHaasCombsTheMonoSumBounded() {
+    // A fully wet delay cancels the bass outright in mono; a 70 % mix has to bound that.
+    // Measured against the bypassed run, so the engine's own latency cancels out.
+    const size_t frames = 24000;
+    const float freqs[2] = {60.0f, 100.0f};
+    for (float hz : freqs) {
+        std::vector<float> tone = monoSine(frames, hz, 0.25f);
+        const double off = monoSumDb(haasProcess(tone, frames, 70, 500, false), frames / 2);
+        const double on = monoSumDb(haasProcess(tone, frames, 70, 500, true), frames / 2);
+        const double delta = on - off;
+        CHECK(delta < -2.0 && delta > -13.0, "haas mono at %.0f Hz changed by %.2f dB", hz, delta);
+    }
+
+    // Fully wet is the reference depth: 100 Hz is half a period at 5 ms, so it cancels.
+    std::vector<float> tone = monoSine(frames, 100.0f, 0.25f);
+    const double off = monoSumDb(haasProcess(tone, frames, 100, 500, false), frames / 2);
+    const double on = monoSumDb(haasProcess(tone, frames, 100, 500, true), frames / 2);
+    CHECK(on - off < -20.0, "fully wet haas should cancel 100 Hz in mono, got %.2f dB", on - off);
+}
+
+static void testHaasDelaysTheRightChannelOnly() {
+    const size_t frames = 24000;
+    std::vector<float> in(frames * 2);
+    uint32_t seed = 12345;
+    for (size_t i = 0; i < frames; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        in[i * 2] = in[i * 2 + 1] = 0.25f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+    }
+    const std::vector<float> wet = haasProcess(in, frames, 100, 500, true);
+    const std::vector<float> dry = haasProcess(in, frames, 100, 500, false);
+
+    // The left channel is never delayed: it has to match the bypassed run sample for sample.
+    const double leftErr = maxDiff(wet, dry, frames / 2, 0);
+    CHECK(leftErr < 1e-5, "haas touched the left channel by %g", leftErr);
+
+    // The right channel lags the left by 5 ms = 240 samples at 48 kHz.
+    const size_t from = frames / 2;
+    int bestLag = 0;
+    double best = 0.0;
+    for (int lag = 0; lag <= 480; lag++) {
+        double c = 0.0;
+        for (size_t i = from; i + lag < frames; i++) c += (double) wet[i * 2] * (double) wet[(i + lag) * 2 + 1];
+        if (fabs(c) > fabs(best)) {
+            best = c;
+            bestLag = lag;
+        }
+    }
+    // The 0.05 ms LFO wobbles the read position by up to 2.4 samples over the window.
+    const int lagErr = bestLag > 240 ? bestLag - 240 : 240 - bestLag;
+    CHECK(lagErr <= 3, "haas right-channel delay %d samples, expected 240", bestLag);
+}
+
+static void testStereoWidenerKeepsTheMonoSum() {
+    const size_t frames = 24000;
+    std::vector<float> in(frames * 2);
+    uint32_t seed = 4242;
+    for (size_t i = 0; i < frames; i++) {
+        seed = seed * 1664525u + 1013904223u;
+        in[i * 2] = 0.25f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+        seed = seed * 1664525u + 1013904223u;
+        in[i * 2 + 1] = 0.25f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+    }
+    Fx fx;
+    fx.config(48000, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+    fx.simple(EFFECT_CMD_ENABLE);
+    fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+    fx.set(PARAM_GATE_LIMIT, {100});
+    fx.set(kStereoWidenerDelay, {500});
+    fx.set(kStereoWidenerWidth, {200});
+    fx.set(kStereoWidenerEnable, {1});
+    const std::vector<float> out = runStereo(fx, in, frames);
+    const double delta = monoSumDb(out, frames / 2) - monoSumDb(in, frames / 2);
+    CHECK(fabs(delta) < 0.01, "stereo widening changed the mono sum by %.3f dB", delta);
+}
+
+static void testHaasDelayScalesWithSampleRate() {
+    // The delay is a time, not a sample count: one millisecond has to stay one millisecond at every
+    // rate, and the read tap has to stay behind the write pointer at all of them.
+    for (uint32_t rate : {44100u, 48000u, 96000u}) {
+        Fx fx;
+        fx.config(rate, AUDIO_CHANNEL_OUT_STEREO, AUDIO_FORMAT_PCM_FLOAT);
+        fx.simple(EFFECT_CMD_ENABLE);
+        fx.set(PARAM_GATE_OUTPUT_VOLUME, {100});
+        fx.set(PARAM_GATE_LIMIT, {100});
+        fx.set(kDiffSurroundDelay, {100});   // 1 ms: the shortest the UI can ask for
+        fx.set(kDiffSurroundMix, {100});
+        fx.set(kDiffSurroundEnable, {1});
+
+        const size_t frames = rate / 2;
+        std::vector<float> in(frames * 2);
+        uint32_t seed = 12345;
+        for (size_t i = 0; i < frames; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            in[i * 2] = in[i * 2 + 1] = 0.25f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+        }
+        const std::vector<float> out = runStereo(fx, in, frames);
+
+        const int expected = static_cast<int>(std::lround(rate / 1000.0));
+        const size_t from = frames / 2;
+        int bestLag = 0;
+        double best = 0.0;
+        for (int lag = 0; lag <= expected * 4; lag++) {
+            double c = 0.0;
+            for (size_t i = from; i + lag < frames; i++) c += (double) out[i * 2] * (double) out[(i + lag) * 2 + 1];
+            if (fabs(c) > fabs(best)) {
+                best = c;
+                bestLag = lag;
+            }
+        }
+        const int err = bestLag > expected ? bestLag - expected : expected - bestLag;
+        CHECK(err <= 3, "haas 1 ms at %u Hz gave %d samples, expected %d", rate, bestLag, expected);
+    }
+}
+
 int main() {
     testLibraryInfo();
     testLifecycleAndGetters();
@@ -990,6 +1188,11 @@ int main() {
     testHeadphoneSurround();
     testHrtfOrientation();
     testHeadOrientationParam();
+    testHaasMixZeroIsIdentity();
+    testHaasCombsTheMonoSumBounded();
+    testHaasDelaysTheRightChannelOnly();
+    testStereoWidenerKeepsTheMonoSum();
+    testHaasDelayScalesWithSampleRate();
     testParametricEq();
     testSpeakerModules();
     testBassStepless();
