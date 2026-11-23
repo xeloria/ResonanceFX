@@ -231,6 +231,8 @@
     <string name="status_fact_sample_rate">샘플 레이트</string>
     <string name="status_fact_channels">채널</string>
     <string name="status_fact_convolver">컨볼버</string>
+    <string name="status_fact_diagnosis">진단</string>
+    <string name="status_diagnosis_hint">코드 %1$s — 정확한 원인은 루트 관리자의 모듈 작업(Action)에서 확인하세요.</string>
     <string name="status_fact_kernel_loaded">임펄스 응답 로드됨</string>
     <string name="status_fact_no_kernel">임펄스 응답 없음</string>
     <string name="status_copy_report">보고서 복사</string>

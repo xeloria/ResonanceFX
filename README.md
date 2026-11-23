@@ -25,9 +25,9 @@ real-time DSP engine, a universal Magisk / KernelSU / APatch module, and a moder
 
 ---
 
-> **🆕 What's new in 2.6.0** — the Action button can no longer lose the effect on ROMs whose
-> config lives in `soundfx` overlays, and the Master sliders move in 0.5 dB steps. Full details
-> in the [changelog](CHANGELOG.md).
+> **🆕 What's new in 2.7.0** — every failure now reports one stable diagnosis code (`E03`, `E06`,
+> `E10`…), in the module card, the Action output and the app, with the exact reason and the fix.
+> Full details in [DIAGNOSTICS.md](DIAGNOSTICS.md) and the [changelog](CHANGELOG.md).
 
 ## 💡 Why ResonanceFX?
 
@@ -109,8 +109,11 @@ restarts and impulse-response re-upload when the output sample rate changes.
 | **Need help or want to report a bug** | In the app: **Status → Copy report**. Attach that plus the logs below to an issue. |
 
 **Logs:** `/data/adb/resonancefx/logs/` — `install.log`, `boot.log`, `logcat.txt`, `action.log`.
-After every boot the module description shows a ✅ / ⚠️ / ❌ verdict, checked against the audio
-HAL's own list of registered effects.
+After every boot the module description shows a ✅ / ❌ verdict with a stable code. The code names
+the exact failing check (missing mount, unreadable config, AIDL engine missing, library rejected
+by the linker namespace, and so on); see **[DIAGNOSTICS.md](DIAGNOSTICS.md)** for the table and
+what each fix means. The app's Status screen shows the same code, and the copied report includes
+the reason.
 
 ## 📋 Compatibility
 

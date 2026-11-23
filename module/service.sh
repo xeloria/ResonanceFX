@@ -59,25 +59,23 @@ logcat -d -b all 2>/dev/null | \
 # once and keep the first definition.
 errors="$(grep -iE "resonancefx|$RFX_UUID" "$RFX_LOGDIR/logcat.txt" | grep -iE "fail|error|cannot|could not|not found|denied|skipping|not exist" | grep -viE "already exist|audit|avc:|relabel|selinux|scontext=|tcontext=|permissive=" | head -n 1)"
 
+# The factory can register a little after sys.boot_completed; poll once instead of writing a
+# false failure into the module description.
+tries=0
+while [ "$tries" -lt 10 ]; do
+    rfx_engine_registered && break
+    sleep 3
+    tries=$((tries + 1))
+done
+
 factory="$(rfx_factory_mode)"
-if [ "$factory" = aidl ] && [ -z "$(rfx_aidl_lib)" ]; then
-    rfx_set_description "❌ This ROM uses the AIDL effect HAL; this build only ships the legacy engine."
-elif ! rfx_lib_visible; then
-    rfx_set_description "❌ Audio HAL cannot see the engine library ($(rfx_active_lib)); reboot. (see $RFX_LOGDIR)"
-elif [ -z "$total" ] || [ "$total" = "0" ]; then
-    rfx_set_description "❌ No audio effects config found on this ROM."
-elif [ "$missing" -gt 0 ]; then
-    rfx_set_description "❌ $missing of $total config(s) not visible to the audio HAL ($mode)."
-elif rfx_engine_registered; then
-    if [ -n "$errors" ]; then
-        rfx_set_description "✅ Active: $total config(s), $mode mount, $factory factory (warnings in $RFX_LOGDIR)."
-    else
-        rfx_set_description "✅ Active: $total config(s), $mode mount, $factory factory, $(rfx_lib_targets | awk '{print $2}' | tr '\n' ' ')"
-    fi
-elif [ -n "$errors" ]; then
-    rfx_set_description "⚠️ Loaded with errors: ${errors##*: }"
+rfx_diagnose
+diag="$(rfx_diag_get 1)"
+if [ "$diag" = OK ]; then
+    rfx_set_verdict OK "Active: $total config(s), $mode mount, $factory factory."
 else
-    rfx_set_description "❌ Audio HAL did not register the engine (see $RFX_LOGDIR)."
+    rfx_set_verdict "$diag" "$(rfx_diag_get 2)"
 fi
+rfx_publish_diagnosis
 registered=no; rfx_engine_registered && registered=yes
-rfx_log "service: factory=$factory pids=$(rfx_effect_pids | tr ' ' ' ') total=$total missing=$missing mode=$mode registered=$registered errors=${errors:-none}"
+rfx_log "service: factory=$factory pids=$(rfx_effect_pids | tr ' ' ' ') total=$total missing=$missing mode=$mode registered=$registered diagnosis=$diag errors=${errors:-none}"

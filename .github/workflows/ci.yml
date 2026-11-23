@@ -40,6 +40,8 @@ jobs:
         run: bash tests/test-factory.sh
       - name: Module action diagnostics
         run: bash tests/test-action.sh
+      - name: Diagnosis decision tree
+        run: bash tests/test-diagnose.sh
       - name: Engine host tests (ASan/UBSan)
         run: bash tests/run-engine-tests.sh
 

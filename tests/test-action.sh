@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Xeloria
-# Runs module/action.sh against a stub common.sh and checks the verdict lines:
-# registration that only appears after a delay still counts as success, and a
-# HAL that never registers is reported as "not registered yet" (with zero
-# configs missing), never as missing configs.
+# Runs module/action.sh against a stub common.sh and checks that the Action prints the
+# diagnosis code from the shared decision tree, including the delayed-registration case.
 #
 # Usage: tests/test-action.sh   (RFX_ACTION_SH overrides the script under test)
 set -u
@@ -32,6 +30,8 @@ RFX_LIB_AIDL=libresonancefx_aidl.so
 RFX_STATE="$SANDBOX/state"
 RFX_LOGDIR="$SANDBOX"
 RFX_UUID=00000000-0000-0000-0000-000000000000
+RFX_TEST_MISSING=$2
+RFX_TEST_LIB_OK=$3
 rfx_log() { :; }
 rfx_api() { echo 35; }
 rfx_root_impl() { echo kernelsu; }
@@ -49,13 +49,25 @@ rfx_generate_configs() { :; }
 rfx_first_config() { :; }
 rfx_ensure_mounted() { :; }
 rfx_restart_audio() { :; }
-rfx_configs_missing() { echo $2; }
-rfx_lib_visible() { [ "$3" = "1" ]; }
+rfx_configs_missing() { echo "\$RFX_TEST_MISSING"; }
+rfx_lib_visible() { [ "\$RFX_TEST_LIB_OK" = "1" ]; }
 rfx_engine_registered() {
     n=\$(( \$(cat "$SANDBOX/calls" 2>/dev/null || echo 0) + 1 ))
     echo \$n > "$SANDBOX/calls"
     [ \$n -gt $1 ]
 }
+rfx_diagnose() {
+    if rfx_engine_registered; then c=OK; s="Engine registered."
+    elif [ "\$RFX_TEST_MISSING" != "0" ]; then c=E06; s="The config has no ResonanceFX entry."
+    elif ! rfx_lib_visible; then c=E03; s="The audio HAL cannot see the library."
+    elif [ -s "\$RFX_STATE/configs" ]; then c=E14; s="The effect HAL has not registered the engine yet."
+    else c=E04; s="No audio effects config."
+    fi
+    printf '%s|%s||\n' "\$c" "\$s" > "\$RFX_STATE/diagnosis"
+}
+rfx_diag_get() { cut -d'|' -f"\$1" "\$RFX_STATE/diagnosis"; }
+rfx_set_verdict() { :; }
+rfx_publish_diagnosis() { :; }
 EOF
     printf '#!/bin/sh\necho test\n' > "$SANDBOX/bin/getprop"
     chmod +x "$SANDBOX/bin/getprop"
@@ -66,24 +78,22 @@ EOF
 
 # Registers on the third poll: must succeed despite the delay.
 run_case 2 0 1
-check "delayed registration succeeds" "Result: ✅" "NOT registered"
+check "delayed registration succeeds" "Result: ✅ OK" "NOT registered"
 
-# Never registers, nothing missing: must say so, not blame missing configs.
+# Never registers, nothing missing: E14, not a config error.
 run_case 99 0 1
-check "unregistered HAL reported honestly" "Result: ⚠️" "cannot see"
+check "unregistered HAL reported as E14" "Result: ❌ E14" "cannot see"
 
-# Configs genuinely not visible to the audio HAL: the failure keeps its real reason.
+# Configs genuinely not visible to the audio HAL: E06 keeps the real reason.
 run_case 99 2 1
-check "configs not visible reported" "Result: ❌ 2 config(s) not visible" "⚠️"
+check "configs not visible reported as E06" "Result: ❌ E06" "E14"
 
-# Library exists in the shell but not in the effect process's view: name that, not the configs.
+# Library exists in the shell but not in the effect process's view: E03, not E06.
 run_case 99 0 0
-check "hidden library reported" "the audio HAL cannot see" "not visible to the audio HAL. Full"
+check "hidden library reported as E03" "Result: ❌ E03" "E06"
 
-# No config could be patched: the old code reported "library and configs are visible" because an
-# empty list has zero missing entries, which is how #11 stayed hidden.
+# No config could be patched: E04, and never "library and configs are visible".
 run_case 99 0 1 0
-check "no configs is a failure" "no audio effects config is installed" "visible to the audio HAL"
-check "no configs is not reported as zero missing" "no audio effects config is installed" "0 config(s) not visible"
+check "no configs reported as E04" "Result: ❌ E04" "visible to the audio HAL"
 
 exit $fail

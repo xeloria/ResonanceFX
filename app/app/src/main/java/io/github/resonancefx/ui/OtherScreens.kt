@@ -72,6 +72,7 @@ import io.github.resonancefx.App
 import io.github.resonancefx.BuildConfig
 import io.github.resonancefx.R
 import io.github.resonancefx.data.AttachMode
+import io.github.resonancefx.driver.Diagnosis
 import io.github.resonancefx.driver.DriverStatus
 import io.github.resonancefx.engine.TestTone
 import io.github.resonancefx.localization.AppLanguage
@@ -223,6 +224,20 @@ fun StatusScreen() {
                         if (status.processing == true) null else stringResource(R.string.status_check_play))
                     status.sessionError?.let { Check(stringResource(R.string.status_check_session), false, it) }
                     status.assetError?.let { Check(stringResource(R.string.status_check_imported_file), false, it) }
+                    if (status.diagnosisCode != Diagnosis.OK.code) {
+                        status.moduleDiagnosis?.let { module ->
+                            Text(
+                                listOf(module.short, module.fix).filter { it.isNotBlank() }.joinToString(" "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.status_diagnosis_hint, status.diagnosisCode),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
         }
@@ -232,6 +247,7 @@ fun StatusScreen() {
                     Fact(stringResource(R.string.status_fact_driver), status.versionName?.let { "$it (${status.versionCode})" } ?: "—")
                     Fact(stringResource(R.string.status_fact_architecture), status.architecture ?: "—")
                     Fact(stringResource(R.string.status_fact_factory), status.factory ?: stringResource(R.string.status_fact_not_detected))
+                    Fact(stringResource(R.string.status_fact_diagnosis), status.diagnosisCode)
                     Fact(stringResource(R.string.status_fact_sample_rate), status.sampleRate?.let { "$it Hz" } ?: "—")
                     Fact(stringResource(R.string.status_fact_channels), status.channels?.toString() ?: "—")
                     Fact(stringResource(R.string.status_fact_convolver), when (status.kernelLoaded) {

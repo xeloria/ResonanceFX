@@ -73,34 +73,21 @@ while [ "$tries" -lt 15 ]; do
     tries=$((tries + 1))
 done
 
-missing="$(rfx_configs_missing)"
-factory="$(rfx_factory_mode)"
-pids="$(rfx_effect_pids)"
-aidl_missing=0
-[ "$factory" = aidl ] && [ -z "$(rfx_aidl_lib)" ] && aidl_missing=1
 if [ "$registered" = "1" ]; then say "Audio HAL: engine registered"; else say "Audio HAL: engine NOT registered yet"; fi
-if [ "$aidl_missing" = "1" ]; then
-    say "Result: ❌ this ROM uses the AIDL effect HAL; this build only ships the legacy engine."
-    say "The AIDL engine build (libresonancefx_aidl.so) is required for this device."
-elif [ -z "$pids" ]; then
-    say "Result: ⚠️ could not inspect the audio HAL from this session (private PID namespace)."
-    say "Reboot so the boot-stage scripts verify and apply the mounts from init."
-elif [ ! -s "$RFX_STATE/configs" ]; then
-    say "Result: ❌ no audio effects config is installed, so the factory cannot see the engine."
-    say "Reboot once: the boot stage snapshots the ROM's configs before the module mount."
-elif ! rfx_lib_visible; then
-    say "Result: ❌ the audio HAL cannot see $active."
-    say "The mount is not shared with the effect process (stale bind or a private mount namespace)."
-    say "Reboot so the boot-stage scripts apply it in init's namespace. Full log: $RFX_LOGDIR"
-elif [ "$missing" != "0" ]; then
-    say "Result: ❌ $missing config(s) not visible to the audio HAL. Full log: $RFX_LOGDIR"
-elif [ "$registered" != "1" ]; then
-    say "Result: ⚠️ library and configs are visible to the audio HAL, but it has not registered the engine yet."
-    say "It may still be restarting - wait a few seconds and check the app's Status screen, or tap Action again."
+rfx_diagnose
+diag="$(rfx_diag_get 1)"
+rfx_set_verdict "$diag" "$(rfx_diag_get 2)"
+rfx_publish_diagnosis
+if [ "$diag" = OK ]; then
+    say "Result: ✅ $diag - $(rfx_diag_get 2)"
 else
-    say "Result: ✅ engine and $(wc -l < "$RFX_STATE/configs" | tr -d ' ') config(s) in place."
-    say "Open the ResonanceFX app: the Status screen confirms the effect is registered."
+    say "Result: ❌ $diag - $(rfx_diag_get 2)"
 fi
+detail="$(rfx_diag_get 3)"
+[ -n "$detail" ] && say "Detail: $detail"
+fix="$(rfx_diag_get 4)"
+[ -n "$fix" ] && say "Fix: $fix"
+say "Codes are explained in DIAGNOSTICS.md."
 
 # Recent effect-factory errors mentioning us, if any.
 logcat -d -b all 2>/dev/null | grep -iE "resonancefx|$RFX_UUID" | \

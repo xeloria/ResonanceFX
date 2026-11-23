@@ -46,7 +46,7 @@ rfx_record_factory_mode
 FACTORY="$(rfx_factory_mode)"
 rfx_print "  + $FACTORY"
 if [ "$FACTORY" = aidl ] && [ -z "$(rfx_aidl_lib)" ]; then
-    rfx_print "! This ROM uses the AIDL effect HAL and this build only has the legacy engine."
+    rfx_print "! [E07] This ROM uses the AIDL effect HAL and this build has no AIDL engine for API $API."
     rfx_print "! The effect engine will not load on this device."
 fi
 
@@ -55,7 +55,11 @@ rfx_snapshot_configs
 rfx_generate_configs
 COUNT="$(wc -l < "$RFX_STATE/configs" | tr -d ' ')"
 if [ "$COUNT" -eq 0 ]; then
-    rfx_print "! No audio effects configuration found to patch."
+    if [ -s "$RFX_STATE/config_sources" ]; then
+        rfx_print "! [E05] The audio effects config was found but could not be patched."
+    else
+        rfx_print "! [E04] No audio effects config was found on this ROM."
+    fi
     rfx_print "! The effect will not load on this ROM. See $RFX_LOGFILE"
 else
     cut -d'|' -f1 "$RFX_STATE/configs" | while read -r f; do rfx_print "  + $f"; done

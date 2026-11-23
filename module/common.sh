@@ -228,9 +228,35 @@ rfx_effect_pids() {
     echo "$RFX_EFFECT_PIDS"
 }
 
-# rfx_factory_sees <absolute path>: true when at least one effect process can reach the path.
+# Processes that actually load effect plug-ins: they have a stock effect library mapped under
+# /soundfx/. audioserver often maps none, so "any audio process" can see a file that the factory
+# cannot; that false positive hid the real mount problem in #11. Falls back to rfx_effect_pids
+# when no stock plug-in is mapped yet (fresh boot, or a factory whose config lists only us).
+rfx_effect_loader_pids() {
+    [ -n "${RFX_LOADER_PIDS:-}" ] && { echo "$RFX_LOADER_PIDS"; return; }
+    _pids=
+    for maps in /proc/[0-9]*/maps; do
+        [ -r "$maps" ] || continue
+        grep -q '/soundfx/' "$maps" 2>/dev/null || continue
+        grep -qE "$RFX_AIDL_LIBS|$RFX_LEGACY_LIBS" "$maps" 2>/dev/null || continue
+        pid="${maps#/proc/}"; pid="${pid%/maps}"
+        _pids="$_pids $pid"
+    done
+    RFX_LOADER_PIDS="${_pids# }"
+    echo "$RFX_LOADER_PIDS"
+}
+
+# Pids whose view of the filesystem decides whether the engine can load: the plug-in loader
+# when one is identifiable, every audio process otherwise.
+rfx_visibility_pids() {
+    _pids="$(rfx_effect_loader_pids)"
+    [ -n "$_pids" ] || _pids="$(rfx_effect_pids)"
+    echo "$_pids"
+}
+
+# rfx_factory_sees <absolute path>: true when an effect loader can reach the path.
 rfx_factory_sees() {
-    _pids="$(rfx_effect_pids)"
+    _pids="$(rfx_visibility_pids)"
     if [ -z "$_pids" ]; then [ -e "$1" ]; return; fi
     for pid in $_pids; do
         [ -e "/proc/$pid/root$1" ] && return 0
@@ -238,9 +264,9 @@ rfx_factory_sees() {
     return 1
 }
 
-# rfx_factory_matches <path> <staged>: true when an effect process sees exactly the staged bytes.
+# rfx_factory_matches <path> <staged>: true when an effect loader sees exactly the staged bytes.
 rfx_factory_matches() {
-    _pids="$(rfx_effect_pids)"
+    _pids="$(rfx_visibility_pids)"
     if [ -z "$_pids" ]; then cmp -s "$2" "$1"; return; fi
     for pid in $_pids; do
         cmp -s "$2" "/proc/$pid/root$1" && return 0
@@ -331,6 +357,14 @@ rfx_config_search_dirs() {
 rfx_first_config() {
     for d in $(rfx_config_search_dirs); do
         if [ -f "$d/$1" ]; then echo "$d/$1"; return; fi
+    done
+}
+
+# The pre-Android 8 config the legacy factory reads, in its own order (libeffects falls back to
+# /vendor/etc/audio_effects.conf, then /system/etc/audio_effects.conf, when no XML parses).
+rfx_first_conf() {
+    for f in /odm/etc/audio_effects.conf /vendor/etc/audio_effects.conf /system/etc/audio_effects.conf; do
+        [ -f "$f" ] && { echo "$f"; return; }
     done
 }
 
@@ -810,6 +844,7 @@ rfx_restart_audio() {
     done
     # The effect processes are new now; forget the cached pids.
     RFX_EFFECT_PIDS=
+    RFX_LOADER_PIDS=
 }
 
 # The definitive check: did the audio HAL's effect factory actually register our UUID?
@@ -818,10 +853,404 @@ rfx_engine_registered() {
     dumpsys media.audio_flinger 2>/dev/null | grep -qi "$RFX_UUID"
 }
 
-rfx_set_description() {
+# ---- Diagnosis ------------------------------------------------------------------------------
+#
+# One ordered decision tree over the same facts the boot stage, the Action button and bug reports
+# use, with a stable code for every failure. The module description, the Action output and the
+# app's report all name that code, so a user can quote "E06" instead of sending logs. Codes are
+# documented in DIAGNOSTICS.md.
+#
+#   OK   the factory registered the engine
+#   E02  no engine build for this CPU
+#   E03  module files not mounted / not visible to the audio HAL
+#   E04  no config that the effect HAL reads
+#   E05  a config was found but could not be patched
+#   E06  the config the factory reads has no ResonanceFX entry
+#   E07  AIDL effect HAL, but this build has no AIDL engine for its API
+#   E08  entry shape does not match the factory generation
+#   E09  the factory cannot find the engine library
+#   E10  the factory cannot load the engine library (namespace/ABI/deps/symbols/SELinux)
+#   E11  the factory rejected the patched config
+#   E14  the factory has not registered the engine yet
+#   E15  the effect HAL generation could not be determined
+
+rfx_diag() { # code short detail fix
+    code="$1"
+    short="$(printf '%s' "$2" | tr '\n|' ' ')"
+    detail="$(printf '%s' "$3" | tr '\n|' ' ')"
+    fix="$(printf '%s' "$4" | tr '\n|' ' ')"
+    printf '%s|%s|%s|%s\n' "$code" "$short" "$detail" "$fix" > "$RFX_STATE/diagnosis"
+    rfx_log "diagnosis: $code - $short${detail:+ ($detail)}"
+}
+
+rfx_diag_get() { # <field 1..4>
+    [ -f "$RFX_STATE/diagnosis" ] || return 1
+    cut -d'|' -f"$1" "$RFX_STATE/diagnosis"
+}
+
+# The path the active build is staged to on this device.
+rfx_expected_lib_path() {
+    name="$(rfx_active_lib)"
+    libdir="$(rfx_primary_libdir)"
+    part="$(rfx_lib_partitions_for "$name" | head -n 1)"
+    echo "$part/$libdir/soundfx/$name"
+}
+
+# Reads our entry out of a patched config as "<library>|<path>|<type>". Works on the XML of both
+# factories and on the pre-Android 8 .conf.
+rfx_config_entry() {
+    cfg="$1"
+    lib=""; path=""; typ=""
+    case "$cfg" in
+        *.conf)
+            if grep -q "$RFX_UUID" "$cfg" 2>/dev/null; then
+                lib="$RFX_LIB_NAME"
+                path="$(awk -v n="$RFX_LIB_NAME" '
+                    $1 == n && $2 == "{" { inlib = 1; next }
+                    inlib && $1 == "path" { print $2; exit }
+                    inlib && $1 == "}" { inlib = 0 }
+                ' "$cfg" 2>/dev/null)"
+            fi
+            ;;
+        *)
+            line="$(grep "$RFX_UUID" "$cfg" 2>/dev/null | head -n 1)"
+            lib="$(printf '%s\n' "$line" | sed -n 's/.*library="\([^"]*\)".*/\1/p')"
+            typ="$(printf '%s\n' "$line" | sed -n 's/.*type="\([^"]*\)".*/\1/p')"
+            if [ -n "$lib" ]; then
+                path="$(grep "<library name=\"$lib\"" "$cfg" 2>/dev/null | head -n 1 |
+                    sed -n 's/.*path="\([^"]*\)".*/\1/p')"
+            fi
+            ;;
+    esac
+    printf '%s|%s|%s' "$lib" "$path" "$typ"
+}
+
+# Resolves a config's library path the way the factory does: a relative name is looked up in
+# /odm, /vendor and /system <libdir>/soundfx, as seen by an effect process (not our shell).
+# A 64-bit device can run a 32-bit audio HAL (common on Qualcomm), so try every installed ABI.
+rfx_resolve_library() {
+    p="$1"
+    case "$p" in
+        /*)
+            if rfx_factory_sees "$p"; then echo "$p"; return 0; fi
+            return 1
+            ;;
+    esac
+    for libdir in $(rfx_lib_targets | awk '{ print $1 }'); do
+        for part in /odm /vendor /system; do
+            cand="$part/$libdir/soundfx/$p"
+            if rfx_factory_sees "$cand"; then echo "$cand"; return 0; fi
+        done
+    done
+    return 1
+}
+
+# "<bits> <machine>" from an ELF header, or nothing when od is unavailable.
+rfx_elf_abi() {
+    hdr="$(od -An -tx1 -N20 "$1" 2>/dev/null | tr -d ' \n')"
+    [ "${#hdr}" -ge 40 ] || return 1
+    cls="$(printf '%s' "$hdr" | cut -c9-10)"
+    mach="$(printf '%s' "$hdr" | cut -c37-40)"
+    case "$cls" in 01) bits=32 ;; 02) bits=64 ;; *) return 1 ;; esac
+    case "$mach" in
+        2800) echo "$bits arm" ;;
+        b700) echo "$bits arm64" ;;
+        3e00) echo "$bits x86_64" ;;
+        0300) echo "$bits x86" ;;
+        *) echo "$bits unknown-$mach" ;;
+    esac
+}
+
+# The architecture a resolved path must have; derived from its lib64/lib directory so a 32-bit
+# HAL on a 64-bit device is not compared against the 64-bit build.
+rfx_expected_elf_abi_for() {
+    case "$1" in
+        */lib64/soundfx/*)
+            case "$(getprop ro.product.cpu.abilist64)" in
+                *arm64-v8a*) echo "64 arm64" ;;
+                *x86_64*) echo "64 x86_64" ;;
+            esac
+            ;;
+        */lib/soundfx/*)
+            case "$(getprop ro.product.cpu.abilist32)" in
+                *armeabi-v7a*) echo "32 arm" ;;
+                *x86*) echo "32 x86" ;;
+            esac
+            ;;
+    esac
+}
+
+# The most recent factory error that is about loading our library or parsing the config. The
+# "Error querying effect descriptor" lines are app requests that arrive when the factory does not
+# know the UUID yet; they are evidence for E14, not load errors.
+rfx_factory_error_line() {
+    {
+        [ -s "$RFX_LOGDIR/logcat.txt" ] && cat "$RFX_LOGDIR/logcat.txt"
+        logcat -d -b all 2>/dev/null
+    } | grep -iE "resonancefx|$RFX_UUID|$RFX_LIB|audio_effects" 2>/dev/null |
+        grep -iE "dlopen|namespace|cannot|failed|error|denied|not found|no such file|parse|invalid" |
+        grep -viE "already exist|Error querying effect descriptor|could not create effect|AudioFlinger could not create effect|audit|avc:|scontext=|tcontext=|permissive=" |
+        tail -n 1
+}
+
+# 32 or 64 for the process that loads effect plug-ins, empty when it cannot be identified.
+rfx_factory_bits() {
+    for pid in $(rfx_effect_loader_pids); do
+        abi="$(rfx_elf_abi "/proc/$pid/exe" 2>/dev/null)"
+        case "$abi" in
+            64\ *) echo 64; return ;;
+            32\ *) echo 32; return ;;
+        esac
+        case "$(readlink "/proc/$pid/exe" 2>/dev/null)" in
+            */lib64/*) echo 64; return ;;
+            */lib/*) echo 32; return ;;
+        esac
+    done
+}
+
+rfx_classify_error() {
+    case "$1" in
+        *"not accessible for the namespace"*) echo NS ;;
+        *"wrong ELF class"*|*"is 32-bit instead of 64-bit"*|*"unexpected e_machine"*) echo ABI ;;
+        *"cannot locate symbol"*|*"undefined symbol"*) echo SYM ;;
+        *"cannot open shared object file"*) echo DEP ;;
+        *"Permission denied"*) echo SELINUX ;;
+        *"Could not find library"*|*"can't find"*) echo MISSING ;;
+        *"Failed to parse"*|*"partially invalid"*) echo PARSE ;;
+        "") echo NONE ;;
+        *) echo OTHER ;;
+    esac
+}
+
+# Full pass; writes $RFX_STATE/diagnosis as "<code>|<short>|<detail>|<fix>".
+rfx_diagnose() {
+    mode="$(rfx_factory_mode)"
+    aidl_lib="$(rfx_aidl_lib)"
+
+    # E02: the module has no build for this CPU.
+    if [ -z "$(rfx_lib_targets)" ]; then
+        rfx_diag E02 "No engine build exists for this CPU." \
+            "ABIs: $(getprop ro.product.cpu.abilist)" \
+            "Send this device's ABI list; the module needs a build for it."
+        return
+    fi
+
+    # E07: the factory is AIDL and this package has no AIDL engine.
+    if [ "$mode" = aidl ] && [ -z "$aidl_lib" ]; then
+        rfx_diag E07 "This ROM uses the AIDL effect HAL, but this build has no AIDL engine for API $(rfx_api)." \
+            "AIDL builds packaged: $(ls "$MODDIR"/engine/*/libresonancefx_aidl*.so 2>/dev/null | sed 's|.*/||' | tr '\n' ' ')" \
+            "Update the module to 2.6.0 or newer."
+        return
+    fi
+
+    # E15: no idea which factory generation this ROM has.
+    case "$mode" in
+        aidl) cfg_name=audio_effects_config.xml ;;
+        legacy) cfg_name=audio_effects.xml ;;
+        *)
+            rfx_diag E15 "Could not detect which effect HAL this ROM uses." \
+                "The factory mode is unknown; audio may still be starting." \
+                "Wait a few seconds and run the Action again; if it persists, reboot."
+            return
+            ;;
+    esac
+    # E07 (32-bit): the module ships the AIDL front-end for the primary 64-bit ABI only.
+    if [ "$mode" = aidl ] && [ "$(rfx_factory_bits)" = 32 ] &&
+        ! ls "$MODDIR"/engine/armeabi-v7a/libresonancefx_aidl*.so >/dev/null 2>&1; then
+        rfx_diag E07 "This ROM's AIDL effect HAL is 32-bit, but the AIDL engine is built for 64-bit only." \
+            "Factory bitness: 32; packaged AIDL builds: $(ls "$MODDIR"/engine/*/libresonancefx_aidl*.so 2>/dev/null | sed 's|.*/||' | tr '\n' ' ')" \
+            "This device needs a 32-bit AIDL build; report it so one can be added."
+        return
+    fi
+
+    eff="$(rfx_first_config "$cfg_name")"
+    # Pre-Android 8 (and ROMs with no XML) read the legacy .conf. Only when no XML exists: once
+    # an XML parses, libeffects never falls back to the .conf.
+    if [ "$mode" = legacy ] && [ -z "$eff" ]; then
+        eff="$(rfx_first_conf)"
+        cfg_name=audio_effects.conf
+    fi
+
+    # E16: this shell cannot see the audio processes, so nothing below can be verified.
+    if [ -z "$(rfx_effect_pids)" ] && [ "$(getprop init.svc.audioserver 2>/dev/null)" = running ]; then
+        rfx_diag E16 "This session cannot inspect the audio HAL (private PID namespace)." \
+            "audioserver is running, but no audio process is visible from this shell; mounts and configs cannot be checked." \
+            "Run the Action from the root manager's own screen, or reboot; the boot stage checks the same facts from init."
+        return
+    fi
+
+    # E03: the engine must be visible to the process that loads effects.
+    if ! rfx_lib_visible; then
+        expected="$(rfx_expected_lib_path)"
+        if [ -e "$expected" ]; then
+            rfx_diag E03 "The module is installed, but the audio HAL cannot see its files." \
+                "$expected exists here but not in the effect process (mount namespace not shared)." \
+                "Reboot; if it persists, set the root manager to the global mount namespace."
+        else
+            rfx_diag E03 "The module did not stage the engine library." \
+                "Expected $expected; module directory: $MODDIR" \
+                "Reinstall the module and reboot."
+        fi
+        return
+    fi
+
+    # E05: configs were found but none survived patching (AIDL missing is E07, above).
+    if [ ! -s "$RFX_STATE/configs" ]; then
+        if [ -s "$RFX_STATE/config_sources" ]; then
+            rfx_diag E05 "The audio effects config was found but could not be patched." \
+                "Sources: $(cut -d'|' -f1 "$RFX_STATE/config_sources" | tr '\n' ' ')" \
+                "Send the ROM's audio_effects.xml and these logs; its shape is unsupported."
+        else
+            rfx_diag E04 "No audio effects config was found on this ROM." \
+                "Searched /odm/etc, /vendor/etc/audio/sku_<sku>, /vendor/etc and /system/etc." \
+                "Send the ROM name and these logs; the module does not know this ROM's config path."
+        fi
+        return
+    fi
+
+    # E04/E06: which configs carry us? A vendor factory can read a file outside the AOSP order
+    # (Xiaomi /my_product, some MTK builds), so E06 is only certain when none of the configs the
+    # module patched contains the entry. Prefer the AOSP-effective file when it carries us;
+    # otherwise use the first vendor config that does.
+    patched="$(cut -d'|' -f1 "$RFX_STATE/configs" 2>/dev/null | tr '\n' ' ')"
+    carriers=""
+    for c in "$eff" $patched; do
+        [ -f "$c" ] || continue
+        grep -q "$RFX_UUID" "$c" 2>/dev/null || continue
+        case " $carriers " in *" $c "*) ;; *) carriers="$carriers $c" ;; esac
+    done
+    if [ -z "$carriers" ]; then
+        if [ -z "$eff" ]; then
+            rfx_diag E04 "No $cfg_name was found where the effect HAL reads it." \
+                "Patched: ${patched:-none}" \
+                "Send the ROM name and these logs; the module does not know this ROM's config path."
+        else
+            rfx_diag E06 "No audio effects config on this ROM contains a ResonanceFX entry." \
+                "Factory=$mode; AOSP-effective: $eff; patched: ${patched:-none}" \
+                "Reinstall 2.6.0 or newer; if it persists, send $eff and these logs."
+        fi
+        return
+    fi
+    chosen=""
+    if [ -n "$eff" ]; then
+        case " $carriers " in *" $eff "*) chosen="$eff" ;; esac
+    fi
+    [ -n "$chosen" ] || chosen="$(printf '%s\n' $carriers | head -n 1)"
+
+    # E08: the entry must match the factory generation.
+    entry="$(rfx_config_entry "$chosen")"
+    lib="$(printf '%s' "$entry" | cut -d'|' -f1)"
+    path="$(printf '%s' "$entry" | cut -d'|' -f2)"
+    typ="$(printf '%s' "$entry" | cut -d'|' -f3)"
+    if [ "$mode" = aidl ]; then
+        if [ "$lib" != "$RFX_LIB_AIDL_NAME" ] || [ -z "$typ" ]; then
+            rfx_diag E08 "The AIDL config entry has the wrong shape." \
+                "library=${lib:-missing} type=${typ:-missing} in $chosen" \
+                "Reinstall the module; the entry must use the AIDL build and its type UUID."
+            return
+        fi
+    elif [ "$lib" = "$RFX_LIB_AIDL_NAME" ]; then
+        rfx_diag E08 "A legacy effect HAL was given an AIDL entry." \
+            "library=$lib in $chosen" \
+            "Reinstall the module; this entry cannot be loaded by the legacy ABI."
+        return
+    fi
+
+    # E09: the library the entry names must resolve where the factory looks.
+    if [ -z "$path" ]; then
+        rfx_diag E09 "The config entry has no library path." "$entry in $chosen" "Reinstall the module."
+        return
+    fi
+    resolved="$(rfx_resolve_library "$path")"
+    if [ -z "$resolved" ]; then
+        rfx_diag E09 "The effect HAL cannot find the engine library." \
+            "$path is not in /odm, /vendor or /system soundfx directories (as seen by the audio HAL)." \
+            "Reinstall the module; if it persists, send these logs."
+        return
+    fi
+
+    # Registered? Then the load worked and old log lines are irrelevant.
+    if rfx_engine_registered; then
+        rfx_diag OK "Engine registered." "factory=$mode config=$chosen library=$resolved"
+        return
+    fi
+
+    # E10: the file is there but cannot be loaded.
+    elf="$(rfx_elf_abi "$resolved")"
+    want="$(rfx_expected_elf_abi_for "$resolved")"
+    if [ -n "$elf" ] && [ -n "$want" ] && [ "$elf" != "$want" ]; then
+        rfx_diag E10 "The engine library has the wrong CPU architecture." \
+            "$resolved is $elf; this HAL needs $want." \
+            "Install the module build for this device."
+        return
+    fi
+    err="$(rfx_factory_error_line)"
+    kind="$(rfx_classify_error "$err")"
+    case "$kind" in
+        NS)
+            rfx_diag E10 "The effect HAL's linker namespace rejects the engine library." "$err" \
+                "Report this ROM: the library is in a partition this HAL cannot load from."
+            return ;;
+        ABI|SYM|DEP|SELINUX)
+            rfx_diag E10 "The effect HAL cannot load the engine library ($kind)." "$err" \
+                "Send this log; the build or its dependencies do not match this HAL."
+            return ;;
+        PARSE)
+            rfx_diag E11 "The effect HAL rejected the patched config." "$err" \
+                "Send the config and this log; the ROM's parser rejects an entry the module wrote."
+            return ;;
+        MISSING)
+            rfx_diag E09 "The effect HAL could not find the engine library in its search path." "$err" \
+                "Send this log."
+            return ;;
+        OTHER)
+            rfx_diag E10 "The effect HAL reported an error while loading the engine." "$err" \
+                "Send this log; it names the library or config the ROM rejected."
+            return ;;
+    esac
+
+    # Nothing above matched: the config and library are correct but the factory has not loaded us.
+    rfx_diag E14 "The effect HAL has not registered the engine yet." \
+        "Config and library are in place (factory=$mode, $chosen, $resolved), but the HAL has not loaded it." \
+        "Tap Action again or reboot; if it persists, send these logs."
+}
+
+# Writes the one-line module description: healthy keeps the tagline, a failure names the code and
+# the reason so the root manager itself tells the user what is wrong.
+rfx_set_verdict() {
     prop="$MODDIR/module.prop"
     [ -f "$prop" ] || return 0
+    code="$1"
+    short="$2"
     base="Free and open-source audio effects engine by Xeloria."
-    sed -i "s|^description=.*|description=$1 $base|" "$prop"
+    case "$code" in
+        OK) desc="✅ $short $base" ;;
+        *) desc="❌ $code: $short Open the module's Action for details." ;;
+    esac
+    desc="$(printf '%s' "$desc" | tr '\n\r\t|' '    ')"
+    awk -v d="$desc" '/^description=/{print "description=" d; next} {print}' "$prop" > "$prop.tmp" &&
+        mv -f "$prop.tmp" "$prop"
+}
+
+# The app cannot read /data/adb, so publish the root-level verdict into its own files directory
+# (root can write there; the app reads it without any permission). A timestamp and the format
+# version make a stale copy harmless, so removing the module does not leave a lie on screen.
+rfx_publish_diagnosis() {
+    [ -f "$RFX_STATE/diagnosis" ] || return 0
+    boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+    ver="$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null)"
+    now="$(date +%s 2>/dev/null)"
+    for d in "${RFX_APP_FILES:-/data/user/0/io.github.resonancefx/files}" /data/data/io.github.resonancefx/files; do
+        [ -d "$d" ] || continue
+        f="$d/module-diagnosis.txt"
+        printf '# rfx-diagnosis f=1 v=%s t=%s boot=%s\n' "$ver" "$now" "$boot" > "$f" 2>/dev/null || continue
+        cat "$RFX_STATE/diagnosis" >> "$f" 2>/dev/null || continue
+        chmod 0644 "$f" 2>/dev/null
+        uid="$(stat -c %u "$d" 2>/dev/null)"
+        [ -n "$uid" ] && chown "$uid:$uid" "$f" 2>/dev/null
+        return 0
+    done
+    # The app has not created its files directory yet; the next boot retries.
+    return 0
 }
 

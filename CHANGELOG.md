@@ -1,5 +1,37 @@
 # Changelog
 
+## v2.7.0
+
+Added:
+
+- **A stable diagnosis code for every failure.** The boot stage, the Action button and the app's
+  Status screen now run one ordered decision tree and report the same code (`E03` files not
+  mounted, `E04` no config, `E06` the config the HAL reads has no entry, `E07` AIDL engine
+  missing, `E09`/`E10` library not found or not loadable, `E11` config rejected, `E14` not
+  registered yet, and so on). The module description in the root manager shows the code after
+  boot, and the Action prints the reason, the detail and the fix. Codes and checks are documented
+  in `DIAGNOSTICS.md`.
+- The app reports its observable half of the same diagnosis (`E04`, `E06`, `E07`, `E12`, `E13`,
+  `E14`) on the Status screen and in the copied report.
+- The diagnosis covers pre-Android 8 `.conf`-only ROMs, 32-bit audio HALs on 64-bit devices, and
+  reports `E16` when a private PID namespace hides the audio processes from the Action.
+- `E06` is now only reported when *no* config the module patched carries the entry, so vendor
+  configs outside the AOSP search order (Xiaomi `/my_product`, some MTK builds) are not
+  misdiagnosed. Visibility is judged from the processes that actually map effect plug-ins, not
+  from every process whose name contains “audio”.
+- A 32-bit AIDL effect HAL is reported as `E07` (the shipped AIDL front-end is 64-bit only)
+  instead of surfacing as a misleading library error.
+- The module publishes its verdict to the app's files directory with a boot id, so the app can
+  show the same exact code and reason instead of only its own subset. Stale copies are ignored.
+- Regression tests for every code and for the config-entry, ELF, factory-error, 32-bit resolver
+  and published-verdict helpers.
+
+Changed:
+
+- The installer names `E07`, `E04` and `E05` directly instead of a generic failure message.
+- Version 2.7.0 (20700). Engine DSP is unchanged; the measurements differ only in the reported
+  engine version.
+
 ## v2.6.0
 
 Fixed:

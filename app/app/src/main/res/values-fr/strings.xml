@@ -231,6 +231,8 @@
     <string name="status_fact_sample_rate">Fréquence d’échantillonnage</string>
     <string name="status_fact_channels">Canaux</string>
     <string name="status_fact_convolver">Convolueur</string>
+    <string name="status_fact_diagnosis">Diagnostic</string>
+    <string name="status_diagnosis_hint">Code %1$s — ouvrez l\'action du module dans votre gestionnaire root pour la raison exacte.</string>
     <string name="status_fact_kernel_loaded">Réponse impulsionnelle chargée</string>
     <string name="status_fact_no_kernel">Aucune réponse impulsionnelle</string>
     <string name="status_copy_report">Copier le rapport</string>

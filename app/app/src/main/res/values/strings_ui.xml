@@ -44,6 +44,8 @@
     <string name="status_fact_sample_rate">Sample rate</string>
     <string name="status_fact_channels">Channels</string>
     <string name="status_fact_convolver">Convolver</string>
+    <string name="status_fact_diagnosis">Diagnosis</string>
+    <string name="status_diagnosis_hint">Code %1$s — open the module\'s Action in your root manager for the exact reason.</string>
     <string name="status_fact_kernel_loaded">Impulse response loaded</string>
     <string name="status_fact_no_kernel">No impulse response</string>
     <string name="status_copy_report">Copy report</string>

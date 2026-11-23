@@ -231,6 +231,8 @@
     <string name="status_fact_sample_rate">Частота дискретизации</string>
     <string name="status_fact_channels">Каналы</string>
     <string name="status_fact_convolver">Свёрточный фильтр</string>
+    <string name="status_fact_diagnosis">Диагностика</string>
+    <string name="status_diagnosis_hint">Код %1$s — точную причину показывает действие модуля в менеджере root.</string>
     <string name="status_fact_kernel_loaded">Импульсная характеристика загружена</string>
     <string name="status_fact_no_kernel">Нет импульсной характеристики</string>
     <string name="status_copy_report">Копировать отчёт</string>

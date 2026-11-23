@@ -231,6 +231,8 @@
     <string name="status_fact_sample_rate">采样率</string>
     <string name="status_fact_channels">声道</string>
     <string name="status_fact_convolver">卷积器</string>
+    <string name="status_fact_diagnosis">诊断</string>
+    <string name="status_diagnosis_hint">代码 %1$s — 在 root 管理器的模块“操作”中查看确切原因。</string>
     <string name="status_fact_kernel_loaded">已加载脉冲响应</string>
     <string name="status_fact_no_kernel">无脉冲响应</string>
     <string name="status_copy_report">复制报告</string>
