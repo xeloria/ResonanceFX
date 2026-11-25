@@ -40,6 +40,16 @@ if [ "$live" != unknown ] && [ "$live" != "$used" ]; then
     rfx_ensure_mounted
     late_fix=1
 fi
+# The effect factory may be a vendor process or live in audioserver, and the AIDL library has
+# to be in a partition that process can dlopen. Re-check now that the HAL is up.
+detected="$(rfx_detect_aidl_partition)"
+if [ -n "$detected" ] && [ "$detected" != "$(rfx_aidl_partition)" ]; then
+    rfx_log "service: effect factory is $detected-hosted, moving the AIDL library"
+    echo "$detected" > "$RFX_STATE/aidl_partition"
+    rfx_stage_libraries
+    rfx_ensure_mounted
+    late_fix=1
+fi
 [ "$late_fix" = "1" ] && rfx_restart_audio && sleep 5
 sleep 5
 

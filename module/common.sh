@@ -328,13 +328,41 @@ rfx_lib_partitions() {
     true
 }
 
-# Partitions a given engine build may be installed to. The AIDL build goes to /system only:
-# an APEX-hosted AIDL effect HAL permits /system/lib64 but not /vendor/lib64, and the AOSP
-# factory searches /odm, /vendor and /system in that order, so a vendor copy would be found
-# first and then rejected by the linker namespace.
+# Partition whose linker namespace can dlopen the AIDL build. A vendor-hosted effect HAL
+# (its own process, e.g. /vendor/bin/hw/audiohalservice.*) only reaches /vendor; a factory
+# hosted by audioserver or an APEX only reaches /system. The factory keeps the first copy it
+# finds and does not fall back, so exactly one copy may exist and it has to be in the right
+# place. The choice is detected once (install/action time, when the HAL is running) and kept
+# in $RFX_STATE/aidl_partition for the early boot passes.
+rfx_aidl_partition() {
+    case "$(cat "$RFX_STATE/aidl_partition" 2>/dev/null)" in
+        /vendor|/system) cat "$RFX_STATE/aidl_partition"; return 0 ;;
+    esac
+    echo /system
+}
+
+# Which partition hosts the effect factory? Only meaningful while the audio HAL is running.
+# Vendor processes win over system ones: a ROM may run both, but only a vendor-hosted HAL
+# needs the /vendor copy.
+rfx_detect_aidl_partition() {
+    _pids="$(rfx_effect_pids 2>/dev/null)"
+    for _pid in $_pids; do
+        case "$(readlink "/proc/$_pid/exe" 2>/dev/null)" in
+            /vendor/*) echo /vendor; return 0 ;;
+        esac
+    done
+    for _pid in $_pids; do
+        case "$(readlink "/proc/$_pid/exe" 2>/dev/null)" in
+            /system/*|/apex/*) echo /system; return 0 ;;
+        esac
+    done
+    true
+}
+
+# Partitions a given engine build may be installed to.
 rfx_lib_partitions_for() {
     case "$1" in
-        libresonancefx_aidl*) echo /system ;;
+        libresonancefx_aidl*) rfx_aidl_partition ;;
         *) rfx_lib_partitions ;;
     esac
     true
@@ -564,15 +592,16 @@ rfx_stage_libraries() {
             rfx_log "missing engine build for $abi"
             continue
         fi
-        # Drop builds that do not belong here, including ones an older module version staged:
-        # the AIDL build must not be visible in /vendor (the factory would pick it first and
-        # the HAL's namespace would reject it), and the legacy build is not used from /system
-        # on Android 8+.
-        for d in "$MODDIR/system/vendor/$libdir/soundfx" "$MODDIR/system/$libdir/soundfx"; do
-            [ -d "$d" ] || continue
-            rm -f "$d"/libresonancefx_aidl*.so
-            [ "$(rfx_api)" -ge 26 ] && rm -f "$d/$RFX_LIB"
-        done
+        # Drop builds that do not belong here, including ones an older module version staged
+        # (AIDL builds used to go to /system only). Both locations are cleared because the
+        # factory picks the first copy it finds and hard-fails if that copy is unreachable.
+        rm -f "$MODDIR/system/$libdir/soundfx"/libresonancefx_aidl*.so
+        rm -f "$MODDIR/system/vendor/$libdir/soundfx"/libresonancefx_aidl*.so
+        [ "$(rfx_api)" -ge 26 ] && rm -f "$MODDIR/system/vendor/$libdir/soundfx/$RFX_LIB"
+
+        mkdir -p "$RFX_STATE"
+        detected="$(rfx_detect_aidl_partition)"
+        [ -n "$detected" ] && echo "$detected" > "$RFX_STATE/aidl_partition"
 
         for part in $(rfx_lib_partitions_for "$RFX_LIB"); do
             case "$part" in
@@ -587,17 +616,23 @@ rfx_stage_libraries() {
             rfx_log "staged $abi -> $part/$libdir/soundfx/$RFX_LIB"
         done
 
-        # The AIDL front-end goes to /system, where an APEX-hosted effect HAL can reach it.
+        # The AIDL front-end goes where the same factory can reach it (see
+        # rfx_lib_partitions_for).
         for src in "$MODDIR/engine/$abi"/libresonancefx_aidl*.so; do
             [ -f "$src" ] || continue
             name="${src##*/}"
-            dir="$MODDIR/system/$libdir/soundfx"
-            mkdir -p "$dir"
-            chmod 0755 "$dir"
-            cp -f "$src" "$dir/$name"
-            chmod 0644 "$dir/$name"
-            chcon "$(rfx_lib_context "/system/")" "$dir/$name" 2>/dev/null
-            rfx_log "staged $abi -> /system/$libdir/soundfx/$name"
+            for part in $(rfx_lib_partitions_for "$name"); do
+                case "$part" in
+                    /vendor) dir="$MODDIR/system/vendor/$libdir/soundfx" ;;
+                    *) dir="$MODDIR/system/$libdir/soundfx" ;;
+                esac
+                mkdir -p "$dir"
+                chmod 0755 "$dir"
+                cp -f "$src" "$dir/$name"
+                chmod 0644 "$dir/$name"
+                chcon "$(rfx_lib_context "$part/")" "$dir/$name" 2>/dev/null
+                rfx_log "staged $abi -> $part/$libdir/soundfx/$name"
+            done
         done
     done
 }
@@ -850,7 +885,10 @@ rfx_restart_audio() {
 # The definitive check: did the audio HAL's effect factory actually register our UUID?
 # (audio_flinger dumps every effect library and descriptor it knows.)
 rfx_engine_registered() {
-    dumpsys media.audio_flinger 2>/dev/null | grep -qi "$RFX_UUID"
+    dumpsys media.audio_flinger 2>/dev/null | grep -qi "$RFX_UUID" && return 0
+    # audio_flinger does not list device effects on every ROM (AIDL factories that are not
+    # connected to a chain show an empty list), so a mapped library is proof enough.
+    rfx_lib_visible
 }
 
 # ---- Diagnosis ------------------------------------------------------------------------------
