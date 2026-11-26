@@ -31,12 +31,19 @@ data class Measurements(
         val gainQuiet: Float?,
         val widthDb: Float?,
         val tailDb: Float?,
+        /** Inter-channel delay in ms per band, for effects that shift one channel in time. */
+        val itd: Map<Int, Float>?,
     )
 
     companion object {
         fun parse(text: String): Measurements {
             val o = JSONObject(text)
             fun JSONObject.num(key: String): Float? = if (has(key) && !isNull(key)) getDouble(key).toFloat() else null
+            fun JSONObject.numberMap(key: String): Map<Int, Float>? =
+                optJSONObject(key)?.let { o ->
+                    o.keys().asSequence().filterNot { o.isNull(it) }
+                        .associate { it.toInt() to o.getDouble(it).toFloat() }
+                }
             fun list(a: JSONArray?): List<Float?>? = a?.let { arr ->
                 (0 until arr.length()).map { if (arr.isNull(it)) null else arr.getDouble(it).toFloat() }
             }
@@ -60,6 +67,7 @@ data class Measurements(
                         gainQuiet = e.num("gain1kQuiet"),
                         widthDb = e.num("widthDb"),
                         tailDb = e.num("tailDb"),
+                        itd = e.numberMap("itd"),
                     )
                 },
             )

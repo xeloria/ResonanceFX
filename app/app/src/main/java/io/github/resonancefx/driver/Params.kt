@@ -49,6 +49,7 @@ object Params {
     const val FEATURE_ABX = 0x8000
     const val FEATURE_MEASURED_PROTECTION = 0x10000
     const val FEATURE_HEAD_ORIENTATION = 0x20000
+    const val FEATURE_STEREO_WIDENER = 0x40000
 
     // Setters outside the effect range
     /** 1 = timestamp every processed buffer so GET_STREAMING works. */
@@ -88,9 +89,14 @@ object Params {
     // Differential surround
     const val DIFFERENTIAL_SURROUND_ENABLE = 65557
     const val DIFFERENTIAL_SURROUND_DELAY = 65558
-    const val DIFFERENTIAL_SURROUND_WIDTH = 65590
-    const val DIFFERENTIAL_SURROUND_HIGHPASS = 65591
-    const val DIFFERENTIAL_SURROUND_PROTECT = 65592
+    const val DIFFERENTIAL_SURROUND_MIX = 65590
+
+    // Stereo widening
+    const val STEREO_WIDENER_ENABLE = 65593
+    const val STEREO_WIDENER_DELAY = 65594
+    const val STEREO_WIDENER_WIDTH = 65595
+    const val STEREO_WIDENER_HIGHPASS = 65596
+    const val STEREO_WIDENER_PROTECT = 65597
 
     // Reverberation
     const val REVERBERATION_ENABLE = 65559

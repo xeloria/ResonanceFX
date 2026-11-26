@@ -197,6 +197,31 @@ check "elf: arm" "32 arm" "$(run "rfx_elf_abi '$SANDBOX/arm.elf'")"
 check "resolve: 32-bit HAL" "/vendor/lib/soundfx/libresonancefx.so" \
     "$(run "rfx_lib_targets() { printf 'lib64 arm64-v8a\nlib armeabi-v7a\n'; }; rfx_factory_sees() { [ \"\$1\" = /vendor/lib/soundfx/libresonancefx.so ]; }; rfx_resolve_library libresonancefx.so")"
 
+# APEX-hosted AIDL HALs resolve the library in their own /apex/<name>/lib64/soundfx first.
+mkdir -p "$SANDBOX/apex/com.example.audio/lib64/soundfx"
+: > "$SANDBOX/apex/com.example.audio/lib64/soundfx/libbundleaidl.so"
+apex_env="RFX_APEX_ROOT='$SANDBOX/apex'; rfx_lib_targets() { echo 'lib64 arm64-v8a'; }; rfx_api() { echo 37; }; rfx_factory_mode() { echo aidl; };"
+check "apex: detected" "$SANDBOX/apex/com.example.audio/lib64/soundfx" \
+    "$(run "$apex_env rfx_aidl_apex_dirs" | head -n 1)"
+check "apex: active paths start at the APEX" 1 \
+    "$(run "$apex_env rfx_active_lib_paths" | head -n 1 | grep -c com.example.audio)"
+check "apex: bind targets combine APEX and system" 2 \
+    "$(run "RFX_APEX_ROOT='$SANDBOX/apex'; rfx_lib_bind_targets libresonancefx_aidl_36.so lib64" | wc -l | tr -d ' ')"
+
+# The Samsung failure: the factory parsed the effect but not its library.
+check "classify: library not in map" MISSING \
+    "$(run "rfx_classify_error 'createIdentityWithConfig: library resonancefx_aidl not exist!'")"
+
+# E03 distinguishes "never staged" from "staged but the manager did not mount it".
+mkdir -p "$MODDIR/system/lib64/soundfx"
+: > "$MODDIR/system/lib64/soundfx/libresonancefx_aidl_36.so"
+check "E03: staged but not exposed" E03 "$(diag "$(base "$ok_cfg")
+rfx_lib_visible() { return 1; }
+rfx_expected_lib_path() { echo '/apex/com.example.audio/lib64/soundfx/libresonancefx_aidl_36.so'; }")"
+check "E03: detail names the staged copy" 1 \
+    "$(grep -c 'staged but not exposed' "$STATE/diagnosis")"
+rm -f "$MODDIR/system/lib64/soundfx/libresonancefx_aidl_36.so"
+
 check "classify: namespace" NS "$(run "rfx_classify_error 'is not accessible for the namespace'")"
 check "classify: symbol" SYM "$(run "rfx_classify_error 'cannot locate symbol'")"
 check "classify: dependency" DEP "$(run "rfx_classify_error 'cannot open shared object file'")"

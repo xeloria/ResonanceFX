@@ -127,8 +127,8 @@ private:
 
     // ---- modules, in processing order ----
     Stage stDdc_, stAutoEq_, stConv_, stUserEq_, stLegacyEq_, stGeq_, stLoud_, stDeq_, stDeess_, stVocal_,
-        stVse_, stBass_, stDyn_, stClarity_, stTube_, stAnalog_, stComp_, stMbc_, stField_, stHaas_, stCure_,
-        stHrtf_, stReverb_, stXtc_, stSpeaker_, stAgc_, stProtect_;
+        stVse_, stBass_, stDyn_, stClarity_, stTube_, stAnalog_, stComp_, stMbc_, stField_,
+        stHaas_, stStereoWidener_, stCure_, stHrtf_, stReverb_, stXtc_, stSpeaker_, stAgc_, stProtect_;
 
     fx::BiquadCascade ddc_;
     ParametricEq autoEq_{32}, userEq_{32}, legacyEq_{31}, geq_{31}, loud_{64};
@@ -151,6 +151,7 @@ private:
     MultibandCompressor mbc_;
     fx::FieldSurround field_;
     fx::HaasDelay haas_;
+    fx::StereoWidener stereoWidener_;
     Crossfeed cure_;
     HrtfSpatializer hrtf_;
     Reverb reverb_;
@@ -198,6 +199,7 @@ private:
     Crossfeed::Settings cureSettings_;
     float limiterCeilingDb_ = -0.1f;
     float haasMs_ = 5.0f;
+    float stereoWidenerMs_ = 5.0f;
     int analogLevel_ = 0;
     int spectrumRef_ = 7600, spectrumAmount_ = 0;
     int fieldDepth_ = 200, fieldMid_ = 150;

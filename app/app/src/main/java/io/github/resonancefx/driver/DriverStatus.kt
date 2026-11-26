@@ -6,6 +6,7 @@ package io.github.resonancefx.driver
 import android.os.Build
 import io.github.resonancefx.App
 import io.github.resonancefx.R
+import io.github.resonancefx.model.Catalog
 import io.github.resonancefx.service.EngineService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +31,7 @@ data class DriverStatus(
     val factory: String?,
     val diagnosis: Diagnosis,
     val moduleDiagnosis: ModuleDiagnosis?,
+    val masterOn: Boolean,
     val disableReason: String?,
     val sessionError: String?,
     val assetError: String?,
@@ -46,8 +48,15 @@ data class DriverStatus(
 
     val healthy get() = registered && attached && configured != false && sessionError == null
 
+    /**
+     * The module's verdict, except its E14 ("not registered yet") when the app can already see
+     * the effect in the factory: then the app's E12/E13 (service/attach) is the accurate one.
+     */
+    val activeModuleDiagnosis: ModuleDiagnosis?
+        get() = moduleDiagnosis?.takeUnless { registered && it.code == Diagnosis.E14.code }
+
     /** The module's authoritative code when it published one, else the app-side subset. */
-    val diagnosisCode: String get() = moduleDiagnosis?.code ?: diagnosis.code
+    val diagnosisCode: String get() = activeModuleDiagnosis?.code ?: diagnosis.code
 
     fun report(): String = buildString {
         appendLine("ResonanceFX status report")
@@ -58,7 +67,8 @@ data class DriverStatus(
         appendLine("Driver: $versionName ($versionCode) $architecture")
         appendLine("Stream: ${sampleRate ?: "?"} Hz, ${channels ?: "?"} ch, configured=$configured, processing=$processing")
         appendLine("Effect factory: ${factory ?: "not installed"}")
-        val module = moduleDiagnosis
+        appendLine("Master switch: $masterOn")
+        val module = activeModuleDiagnosis
         if (module != null) {
             appendLine("Diagnosis (module ${module.moduleVersion ?: "?"}): ${module.code} ${module.short}")
             if (module.detail.isNotBlank()) appendLine("  detail: ${module.detail}")
@@ -111,6 +121,7 @@ data class DriverStatus(
                         aidlEngine = hasAidlEngine(),
                     ),
                     moduleDiagnosis = ModuleDiagnosis.read(App.instance.filesDir),
+                    masterOn = App.instance.repository.settings.value.bool(Catalog.KEY_MASTER),
                     disableReason = if (live != null && reason != null && reason != 0)
                         live.getString(Params.GET_DISABLE_REASON_MESSAGE)?.ifBlank { null } ?: "code $reason" else null,
                     sessionError = manager?.error?.value,

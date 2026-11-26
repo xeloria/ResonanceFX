@@ -13,19 +13,24 @@ if rfx_in_recovery; then
     exit 0
 fi
 
+# All mounts are applied after sys.boot_completed below. Doing them before boot can trip the
+# boot watchdog on Samsungs and is unnecessary: the HAL is restarted afterwards anyway (#17).
 late_fix=0
-if [ ! -f "$RFX_STATE/post_mount_ran" ]; then
-    # Magisk (or an old KernelSU without post-mount). Magic mount almost always works, but if
-    # it didn't, audio services already started without us: fix up and restart them.
-    if ! rfx_lib_visible || [ "$(rfx_configs_missing)" -gt 0 ]; then
-        rfx_ensure_mounted
-        late_fix=1
-    fi
-fi
 rm -f "$RFX_STATE/post_mount_ran"
 
 # Wait for boot so the logcat below covers the effect factory's first load.
 until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 2; done
+
+# Apply the engine bind once after boot. A private HAL mount namespace can hide the module's
+# overlay from the factory even when the shell sees it (Samsung/KernelSU Next, #17), so do not
+# trust rfx_lib_visible alone; the bind is idempotent and the audio services are restarted below.
+# post-mount already applied the binds before audio started, so only fall back when the loader
+# still cannot see the engine or a config (overlay unavailable, late mount, private namespace).
+if ! rfx_lib_visible || [ "$(rfx_configs_missing)" -gt 0 ]; then
+    rfx_log "service: library or configs still not visible after boot, re-applying"
+    rfx_ensure_mounted
+    late_fix=1
+fi
 
 # The effect factory's ABI only becomes visible once the audio HAL has its libraries mapped.
 # If this boot assumed the other one (first boot after installing, an OTA, a HAL switch),
@@ -67,7 +72,7 @@ logcat -d -b all 2>/dev/null | \
     tail -n 200 > "$RFX_LOGDIR/logcat.txt"
 # "already exist" is expected: vendors that load several config files see our effect more than
 # once and keep the first definition.
-errors="$(grep -iE "resonancefx|$RFX_UUID" "$RFX_LOGDIR/logcat.txt" | grep -iE "fail|error|cannot|could not|not found|denied|skipping|not exist" | grep -viE "already exist|audit|avc:|relabel|selinux|scontext=|tcontext=|permissive=" | head -n 1)"
+errors="$(grep -iE "resonancefx|$RFX_UUID" "$RFX_LOGDIR/logcat.txt" | grep -iE "fail|error|cannot|could not|not found|denied|skipping|not exist|dlopen|namespace" | grep -viE "already exist|audit|avc:|relabel|selinux|scontext=|tcontext=|permissive=|ActivityManager|ActivityTaskManager|Freecess|Notification|PackageManager|WindowManager|SurfaceFlinger|InputDispatcher|Launcher|skipping freeze" | tail -n 1)"
 
 # The factory can register a little after sys.boot_completed; poll once instead of writing a
 # false failure into the module description.

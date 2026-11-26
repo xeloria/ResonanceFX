@@ -46,6 +46,9 @@
     <string name="status_fact_convolver">Convolver</string>
     <string name="status_fact_diagnosis">Diagnosis</string>
     <string name="status_diagnosis_hint">Code %1$s — open the module\'s Action in your root manager for the exact reason.</string>
+    <string name="status_diagnosis_app_hint">Code %1$s — this is an app-side state; use the button below or check the master switch.</string>
+    <string name="status_master_off">Master switch is off.</string>
+    <string name="status_start_engine">Start engine</string>
     <string name="status_fact_kernel_loaded">Impulse response loaded</string>
     <string name="status_fact_no_kernel">No impulse response</string>
     <string name="status_copy_report">Copy report</string>
@@ -206,6 +209,7 @@
     <string name="measurements_dynamics">Loud tone (-3 dBFS): %1$s dB · quiet tone (-40 dBFS): %2$s dB</string>
     <string name="measurements_width">Stereo width (side/mid): %1$s dB</string>
     <string name="measurements_tail">Tail 0.3-1.3 s after a click: %1$s dB</string>
+    <string name="measurements_itd">Inter-channel delay: %1$s ms</string>
 
     <!-- Miscellaneous -->
     <string name="error_autoeq_engine_old">AutoEQ needs the ResonanceFX engine v1.0.4 or newer - update the module.</string>

@@ -25,9 +25,9 @@ real-time DSP engine, a universal Magisk / KernelSU / APatch module, and a moder
 
 ---
 
-> **🆕 What's new in 2.7.0** — every failure now reports one stable diagnosis code (`E03`, `E06`,
-> `E10`…), in the module card, the Action output and the app, with the exact reason and the fix.
-> Full details in [DIAGNOSTICS.md](DIAGNOSTICS.md) and the [changelog](CHANGELOG.md).
+> **🆕 What's new in 2.8.0** — the legacy engine now lives in `/system/lib64/soundfx`, where both
+> audioserver and the vendor audio HAL can load it; the Action can't delete a live config bind,
+> and `E13` gets a **Start engine** button. Full details in the [changelog](CHANGELOG.md).
 
 ## 💡 Why ResonanceFX?
 
@@ -230,6 +230,9 @@ changes should come with before/after `tests/measure-engine.sh` output.
 
 GPL-3.0-or-later — see [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) for third-party data
 attributions, and [`docs/LICENSING.md`](docs/LICENSING.md) for how the engine was written.
+
+**In one line:** use it, modify it, ship it — but share your source under the same license and
+keep the notices. The [plain-language guide](docs/LICENSING.md) explains the details.
 
 <div align="center">
 

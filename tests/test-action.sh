@@ -41,6 +41,7 @@ rfx_primary_abi() { echo arm64-v8a; }
 rfx_aidl_lib() { :; }
 rfx_effect_pids() { echo "\$\$"; }
 rfx_active_lib() { echo "\$RFX_LIB"; }
+rfx_active_lib_paths() { echo "/vendor/lib64/soundfx/\$RFX_LIB"; }
 rfx_factory_sees() { [ -f "\$1" ]; }
 rfx_factory_matches() { cmp -s "\$1" "\$2"; }
 rfx_lib_targets() { echo "lib64 arm64-v8a"; }
@@ -67,6 +68,7 @@ rfx_diagnose() {
 }
 rfx_diag_get() { cut -d'|' -f"\$1" "\$RFX_STATE/diagnosis"; }
 rfx_set_verdict() { :; }
+rfx_factory_error_line() { :; }
 rfx_publish_diagnosis() { :; }
 EOF
     printf '#!/bin/sh\necho test\n' > "$SANDBOX/bin/getprop"

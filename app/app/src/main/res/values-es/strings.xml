@@ -40,6 +40,8 @@
     <string name="section_field_summary">Amplía la imagen estéreo.</string>
     <string name="section_diff_title">Surround diferencial</string>
     <string name="section_diff_summary">Amplitud por efecto Haas.</string>
+    <string name="section_stereo_title">Stereo widening</string>
+    <string name="section_stereo_summary">TBD</string>
     <string name="section_vhe_title">Surround para auriculares+</string>
     <string name="section_vhe_summary">Altavoces virtuales para auriculares.</string>
     <string name="section_reverb_title">Reverberación</string>
@@ -233,6 +235,9 @@
     <string name="status_fact_convolver">Convolucionador</string>
     <string name="status_fact_diagnosis">Diagnóstico</string>
     <string name="status_diagnosis_hint">Código %1$s: abre la acción del módulo en tu gestor de root para ver el motivo exacto.</string>
+    <string name="status_diagnosis_app_hint">Código %1$s: es un estado de la app; usa el botón de abajo o revisa el interruptor principal.</string>
+    <string name="status_master_off">El interruptor principal está apagado.</string>
+    <string name="status_start_engine">Iniciar motor</string>
     <string name="status_fact_kernel_loaded">Respuesta al impulso cargada</string>
     <string name="status_fact_no_kernel">Sin respuesta al impulso</string>
     <string name="status_copy_report">Copiar informe</string>
@@ -382,6 +387,7 @@
     <string name="measurements_dynamics">Tono fuerte (-3 dBFS): %1$s dB · tono suave (-40 dBFS): %2$s dB</string>
     <string name="measurements_width">Anchura estéreo (lado/centro): %1$s dB</string>
     <string name="measurements_tail">Cola 0,3-1,3 s tras un clic: %1$s dB</string>
+    <string name="measurements_itd">Inter-channel delay: %1$s ms</string>
 
     <string name="error_autoeq_engine_old">AutoEQ necesita el motor ResonanceFX v1.0.4 o posterior; actualiza el módulo.</string>
     <string name="error_autoeq_profile_missing">AutoEQ: no se encontró el perfil «%1$s»</string>
@@ -606,7 +612,9 @@
     <string name="measure_field_surround">Surround de campo</string>
     <string name="measure_field_surround_settings">intensidad 4, imagen central 50 %</string>
     <string name="measure_differential_surround">Surround diferencial</string>
-    <string name="measure_differential_surround_settings">5 ms, anchura 100 %, paso alto lateral 120 Hz</string>
+    <string name="measure_differential_surround_settings">5 ms, mix 100 %</string>
+    <string name="measure_stereo_widening">Stereo widening</string>
+    <string name="measure_stereo_widening_settings">5 ms, width 100 %, side high-pass 120 Hz, side-only</string>
     <string name="measure_headphone_surround">Surround para auriculares+</string>
     <string name="measure_headphone_surround_settings">calidad 3</string>
     <string name="measure_reverberation">Reverberación</string>
