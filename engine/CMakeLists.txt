@@ -60,6 +60,7 @@ foreach (target resonancefx resonancefx_aidl)
         continue ()
     endif ()
     target_include_directories(${target} PRIVATE
+            src/android/aidl/shim  # android/binder_shell.h as in platform builds (vtable layout)
             src
             src/core/include
             src/android/aidl/generated

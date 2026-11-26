@@ -13,7 +13,7 @@ COPYRIGHT = "Copyright (C) 2026 Xeloria"
 def header_for(path):
     if path.endswith((".kt", ".kts", ".cpp", ".h", ".c")):
         return f"// {TAG}\n// {COPYRIGHT}\n"
-    if path.endswith((".sh", ".py", ".txt")) or path.endswith("CMakeLists.txt") or "update-binary" in path:
+    if path.endswith((".sh", ".py", ".txt", ".rule")) or path.endswith("CMakeLists.txt") or "update-binary" in path:
         return f"# {TAG}\n# {COPYRIGHT}\n"
     return None
 

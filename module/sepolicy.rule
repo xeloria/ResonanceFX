@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Xeloria
+# AOSP-style AIDL effects allocate their FMQ with memfd and an event flag word.
+# The ROM policy never needed these for hal_audio_default (stock effect libs are legacy ABI),
+# so allow the domain its own files plus the ashmem node.
+allow hal_audio_default ashmem_device chr_file open
+allow hal_audio_default ashmem_device chr_file read
+allow hal_audio_default ashmem_device chr_file write
+allow hal_audio_default ashmem_device chr_file ioctl
+allow hal_audio_default ashmem_device chr_file map
+allow hal_audio_default ashmem_device chr_file getattr
+allow hal_audio_default self file open
+allow hal_audio_default self file create
+allow hal_audio_default self file read
+allow hal_audio_default self file write
+allow hal_audio_default self file getattr
+allow hal_audio_default self file setattr
+allow hal_audio_default self file map
+allow hal_audio_default self file ioctl
+allow hal_audio_default self file lock
