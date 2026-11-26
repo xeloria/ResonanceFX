@@ -350,7 +350,8 @@ int32_t EffectContext::getParameter(const effect_param_t* p, effect_param_t* rep
                                                kFeatureTrueStereoKernel | kFeatureSpeakerProfiles |
                                                kFeatureSpeakerProtection | kFeatureCrosstalk |
                                                kFeatureLevelOffset | kFeatureAbx |
-                                               kFeatureMeasuredProtection | kFeatureHeadOrientation));
+                                               kFeatureMeasuredProtection | kFeatureHeadOrientation |
+                                               kFeatureStereoWidener));
         default:
             return -EINVAL;
     }

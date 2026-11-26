@@ -40,6 +40,8 @@
     <string name="section_field_summary">스테레오 이미지를 넓힙니다.</string>
     <string name="section_diff_title">디퍼런셜 서라운드</string>
     <string name="section_diff_summary">Haas 효과로 공간감을 줍니다.</string>
+    <string name="section_stereo_title">Stereo widening</string>
+    <string name="section_stereo_summary">TBD</string>
     <string name="section_vhe_title">헤드폰 서라운드+</string>
     <string name="section_vhe_summary">헤드폰용 가상 스피커.</string>
     <string name="section_reverb_title">리버브</string>
@@ -385,6 +387,7 @@
     <string name="measurements_dynamics">큰 소리(-3 dBFS): %1$s dB · 작은 소리(-40 dBFS): %2$s dB</string>
     <string name="measurements_width">스테레오 폭(사이드/미드): %1$s dB</string>
     <string name="measurements_tail">클릭 후 0.3~1.3초 꼬리: %1$s dB</string>
+    <string name="measurements_itd">Inter-channel delay: %1$s ms</string>
 
     <string name="error_autoeq_engine_old">AutoEQ에는 ResonanceFX 엔진 v1.0.4 이상이 필요합니다 — 모듈을 업데이트하세요.</string>
     <string name="error_autoeq_profile_missing">AutoEQ: ‘%1$s’ 프로필을 찾을 수 없습니다</string>
@@ -604,7 +607,9 @@
     <string name="measure_field_surround">필드 서라운드</string>
     <string name="measure_field_surround_settings">강도 4, 중앙 이미지 50 %</string>
     <string name="measure_differential_surround">디퍼런셜 서라운드</string>
-    <string name="measure_differential_surround_settings">5 ms, 폭 100 %, 사이드 하이패스 120 Hz</string>
+    <string name="measure_differential_surround_settings">5 ms, mix 100 %</string>
+    <string name="measure_stereo_widening">Stereo widening</string>
+    <string name="measure_stereo_widening_settings">5 ms, width 100 %, side high-pass 120 Hz, side-only</string>
     <string name="measure_headphone_surround">헤드폰 서라운드+</string>
     <string name="measure_headphone_surround_settings">품질 3</string>
     <string name="measure_reverberation">리버브</string>

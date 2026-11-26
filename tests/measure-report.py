@@ -23,5 +23,7 @@ for d in lines[1:]:
     extras = [f"{label}: {d[key]:.2f}" for key, label in LABELS if d.get(key) is not None]
     if extras:
         print("   " + " | ".join(extras))
+    if d.get("itd"):
+        print("   itd ms   " + "  ".join(f"{k}:{v:.2f}" for k, v in d["itd"].items() if v is not None))
     if "crosstalk" in d:
         print("   crosstalk" + "".join(f"{fmt(d['crosstalk'][i]):>7}" for i in idx))

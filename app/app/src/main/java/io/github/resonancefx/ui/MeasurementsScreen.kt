@@ -126,6 +126,7 @@ private fun EffectCard(e: Measurements.Effect, sectionTitle: Int?, freqs: List<F
                 }
                 e.widthDb?.let { add(stringResource(R.string.measurements_width, signed(it))) }
                 e.tailDb?.let { add(stringResource(R.string.measurements_tail, String.format(java.util.Locale.ROOT, "%.0f", it))) }
+                e.itd?.get(500)?.let { add(stringResource(R.string.measurements_itd, String.format(java.util.Locale.ROOT, "%.1f", it))) }
             }
             facts.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
         }

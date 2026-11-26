@@ -425,12 +425,29 @@ object Catalog {
                 }) { fx, v ->
                     fx.set(Params.DIFFERENTIAL_SURROUND_DELAY, (v + 1) * 100)
                 },
-                Slider("diff.width", R.string.label_width, 0..200, 100, { c, v ->
+                Slider("diff.mix", R.string.label_mix, 0..100, 100, { c, v ->
                     c.getString(R.string.value_percent, v)
                 }) { fx, v ->
-                    fx.set(Params.DIFFERENTIAL_SURROUND_WIDTH, v)
+                    fx.set(Params.DIFFERENTIAL_SURROUND_MIX, v)
                 },
             ),
+        ),
+        Section(
+            "stereo", R.string.section_stereo_title, R.string.section_stereo_summary,
+            "stereo.enable", Params.STEREO_WIDENER_ENABLE,
+            listOf(
+                Slider("stereo.delay", R.string.label_delay, 0..19, 4, { c, v ->
+                    c.getString(R.string.value_ms, v + 1)
+                }) { fx, v ->
+                    fx.set(Params.STEREO_WIDENER_DELAY, (v + 1) * 100)
+                },
+                Slider("stereo.width", R.string.label_width, 0..200, 100, { c, v ->
+                    c.getString(R.string.value_percent, v)
+                }) { fx, v ->
+                    fx.set(Params.STEREO_WIDENER_WIDTH, v)
+                },
+            ),
+            feature = Params.FEATURE_STEREO_WIDENER,
         ),
         Section(
             "vhe", R.string.section_vhe_title, R.string.section_vhe_summary,

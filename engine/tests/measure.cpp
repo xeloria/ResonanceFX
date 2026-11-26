@@ -10,12 +10,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "Protocol.h"
 #include "android/android_effect_abi.h"
+#include "rfx/dsp/Biquad.h"
 
 extern "C" audio_effect_library_t AELI;
 
@@ -109,6 +111,53 @@ double toneAmp(const std::vector<float>& x, size_t from, double hz) {
     return 2 * std::sqrt(re * re + im * im) / double(n);
 }
 
+/// Inter-channel delay (ms) of one octave band, by cross-correlating the left and right outputs of
+/// the same noise. Returns NaN when the band is too incoherent for the delay to mean anything.
+double bandItd(Setup setup, double centreHz) {
+    Fx fx;
+    setup(fx);
+    const size_t n = static_cast<size_t>(kRate);
+    std::vector<float> l(n), r(n);
+    uint32_t seed = 12345;
+    for (size_t i = 0; i < n; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const float v = static_cast<float>(double(seed >> 8) / 8388608.0 - 1.0);
+        l[i] = r[i] = v;
+    }
+    fx.run(l, r);
+
+    // Octave band around the centre, so each delay is measured on its own content.
+    const rfx::BiquadCoeffs hp = rfx::designRbj(rfx::FilterType::HighPass, centreHz * 0.707, 0.0, 0.7071, kRate);
+    const rfx::BiquadCoeffs lp = rfx::designRbj(rfx::FilterType::LowPass, centreHz * 1.414, 0.0, 0.7071, kRate);
+    std::vector<float> a(n), b(n);
+    rfx::BiquadState hpL, lpL, hpR, lpR;
+    for (size_t i = 0; i < n; ++i) {
+        a[i] = static_cast<float>(rfx::biquadTick(lp, lpL, rfx::biquadTick(hp, hpL, l[i])));
+        b[i] = static_cast<float>(rfx::biquadTick(lp, lpR, rfx::biquadTick(hp, hpR, r[i])));
+    }
+
+    const std::ptrdiff_t maxLag = static_cast<std::ptrdiff_t>(0.025 * kRate);
+    const std::ptrdiff_t frames = static_cast<std::ptrdiff_t>(n);
+    std::ptrdiff_t bestLag = 0;
+    double best = 0.0;
+    for (std::ptrdiff_t lag = -maxLag; lag <= maxLag; ++lag) {
+        double c = 0.0, ea = 0.0, eb = 0.0;
+        for (std::ptrdiff_t i = maxLag; i + maxLag < frames; ++i) {
+            const double x = a[i], y = b[i + lag];
+            c += x * y;
+            ea += x * x;
+            eb += y * y;
+        }
+        const double peak = (ea > 0.0 && eb > 0.0) ? c / std::sqrt(ea * eb) : 0.0;
+        if (std::fabs(peak) > std::fabs(best)) {
+            best = peak;
+            bestLag = lag;
+        }
+    }
+    if (std::fabs(best) < 0.2) return std::numeric_limits<double>::quiet_NaN();
+    return 1000.0 * double(bestLag) / kRate;
+}
+
 std::string jnum(double v) {
     if (!std::isfinite(v)) return "null";
     char b[32];
@@ -117,7 +166,9 @@ std::string jnum(double v) {
 }
 
 /// Response (dB) to a steady sine, left and right fed according to `mode`:
-/// 0 = identical on both, 1 = left only (measures crosstalk into right), 2 = left only, measure left.
+/// 0 = identical on both, 1 = left only (measures crosstalk into right), 2 = left only, measure
+/// left, 3 = identical on both but measure the mono sum (what a single speaker hears), 4 = opposite
+/// polarity on both (side only) and measure left, for an effect that leaves the centre alone.
 double sineGainDb(Setup setup, double hz, double ampDb, int mode) {
     Fx fx;
     setup(fx);
@@ -127,11 +178,18 @@ double sineGainDb(Setup setup, double hz, double ampDb, int mode) {
     for (size_t i = 0; i < n; ++i) {
         const float s = static_cast<float>(a * std::sin(2 * M_PI * hz * double(i) / kRate));
         l[i] = s;
-        r[i] = mode == 0 ? s : 0.0f;
+        r[i] = (mode == 0 || mode == 3) ? s : (mode == 4 ? -s : 0.0f);
     }
     fx.run(l, r);
     const size_t from = n / 2;
-    const double out = toneAmp(mode == 1 ? r : l, from, hz);
+    double out;
+    if (mode == 3) {
+        std::vector<float> m(n);
+        for (size_t i = 0; i < n; ++i) m[i] = 0.5f * (l[i] + r[i]);
+        out = toneAmp(m, from, hz);
+    } else {
+        out = toneAmp(mode == 1 ? r : l, from, hz);
+    }
     return 20 * std::log10(std::max(out, 1e-9) / a);
 }
 
@@ -231,14 +289,16 @@ std::string jstr(const char* v) {
     return out + "\"";
 }
 
-enum Extra { kNone = 0, kDynamics = 1, kCrossfeed = 2, kSpatial = 4 };
+enum Extra { kNone = 0, kDynamics = 1, kCrossfeed = 2, kSpatial = 4, kMonoSum = 8, kItd = 16, kSideOnly = 32 };
 
 /// One scenario: `section` is the app's section id, `name` what it shows, `settings` the
 /// settings measured (the app's defaults unless stated).
 void report(const char* section, const char* name, const char* settings, Setup setup, int extra = kNone) {
     std::string out = "{\"section\":" + jstr(section) + ",\"name\":" + jstr(name) + ",\"settings\":" + jstr(settings) +
                       ",\"response\":[";
-    for (size_t i = 0; i < kFreqCount; ++i) out += (i ? "," : "") + jnum(sineGainDb(setup, kFreqs[i], -24.0, 0));
+    const int responseMode = (extra & kSideOnly) ? 4 : ((extra & kMonoSum) ? 3 : 0);
+    for (size_t i = 0; i < kFreqCount; ++i)
+        out += (i ? "," : "") + jnum(sineGainDb(setup, kFreqs[i], -24.0, responseMode));
     out += "],\"noiseDb\":" + jnum(noiseGainDb(setup, -20.0));
     out += ",\"thd100\":" + jnum(thdPercent(setup, 100, -12.0));
     out += ",\"thd1k\":" + jnum(thdPercent(setup, 1000, -12.0));
@@ -256,6 +316,17 @@ void report(const char* section, const char* name, const char* settings, Setup s
     if (extra & kSpatial) {
         out += ",\"widthDb\":" + jnum(widthDb(setup));
         out += ",\"tailDb\":" + jnum(tailDb(setup));
+    }
+    if (extra & kItd) {
+        const double kItdBands[] = {63, 125, 250, 500, 1000, 2000, 4000, 8000};
+        constexpr size_t kItdBandCount = sizeof(kItdBands) / sizeof(kItdBands[0]);
+        out += ",\"itd\":{";
+        for (size_t i = 0; i < kItdBandCount; ++i) {
+            char key[16];
+            std::snprintf(key, sizeof key, "\"%g\"", kItdBands[i]);
+            out += (i ? "," : "") + std::string(key) + ":" + jnum(bandItd(setup, kItdBands[i]));
+        }
+        out += "}";
     }
     std::printf("%s}\n", out.c_str());
     std::fflush(stdout);
@@ -338,13 +409,16 @@ int main() {
     report("field", "Field surround", "strength 4, mid image 50 %", [](Fx& f) {
         f.set(kFieldSurroundDepth, {500}); f.set(kFieldSurroundMidImage, {150}); f.set(kFieldSurroundEnable, {1});
     }, kSpatial);
-    report("diff", "Differential surround", "5 ms, width 100%, side high-pass 120 Hz", [](Fx& f) {
+    report("diff", "Differential surround", "5 ms, mix 100 %", [](Fx& f) {
         f.set(kDiffSurroundDelay, {500});
-        f.set(kDiffSurroundWidth, {100});
-        f.set(kDiffSurroundHighpass, {120});
-        f.set(kDiffSurroundProtect, {1});
+        f.set(kDiffSurroundMix, {100});
         f.set(kDiffSurroundEnable, {1});
-    }, kSpatial);
+    }, kSpatial | kMonoSum | kItd);
+    report("stereo", "Stereo widening", "5 ms, width 100 %, side high-pass 120 Hz, side-only", [](Fx& f) {
+        f.set(kStereoWidenerDelay, {500});
+        f.set(kStereoWidenerWidth, {100});
+        f.set(kStereoWidenerEnable, {1});
+    }, kSpatial | kSideOnly);
     report("vhe", "Headphone surround+", "quality 3", [](Fx& f) {
         f.set(kHeadphoneSurroundLevel, {2}); f.set(kHeadphoneSurroundEnable, {1});
     }, kCrossfeed | kSpatial);
