@@ -233,6 +233,9 @@
     <string name="status_fact_convolver">Convolucionador</string>
     <string name="status_fact_diagnosis">Diagnóstico</string>
     <string name="status_diagnosis_hint">Código %1$s: abre la acción del módulo en tu gestor de root para ver el motivo exacto.</string>
+    <string name="status_diagnosis_app_hint">Código %1$s: es un estado de la app; usa el botón de abajo o revisa el interruptor principal.</string>
+    <string name="status_master_off">El interruptor principal está apagado.</string>
+    <string name="status_start_engine">Iniciar motor</string>
     <string name="status_fact_kernel_loaded">Respuesta al impulso cargada</string>
     <string name="status_fact_no_kernel">Sin respuesta al impulso</string>
     <string name="status_copy_report">Copiar informe</string>

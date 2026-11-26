@@ -74,6 +74,8 @@ import io.github.resonancefx.R
 import io.github.resonancefx.data.AttachMode
 import io.github.resonancefx.driver.Diagnosis
 import io.github.resonancefx.driver.DriverStatus
+import io.github.resonancefx.model.Catalog
+import io.github.resonancefx.service.refreshMasterTile
 import io.github.resonancefx.engine.TestTone
 import io.github.resonancefx.localization.AppLanguage
 import io.github.resonancefx.service.EngineService
@@ -225,18 +227,41 @@ fun StatusScreen() {
                     status.sessionError?.let { Check(stringResource(R.string.status_check_session), false, it) }
                     status.assetError?.let { Check(stringResource(R.string.status_check_imported_file), false, it) }
                     if (status.diagnosisCode != Diagnosis.OK.code) {
-                        status.moduleDiagnosis?.let { module ->
+                        status.activeModuleDiagnosis?.let { module ->
                             Text(
                                 listOf(module.short, module.fix).filter { it.isNotBlank() }.joinToString(" "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        val appSide = status.diagnosisCode == Diagnosis.E12.code ||
+                            status.diagnosisCode == Diagnosis.E13.code
                         Text(
-                            stringResource(R.string.status_diagnosis_hint, status.diagnosisCode),
+                            stringResource(
+                                if (appSide) R.string.status_diagnosis_app_hint else R.string.status_diagnosis_hint,
+                                status.diagnosisCode,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
+                        if (status.diagnosisCode == Diagnosis.E13.code) {
+                            if (!status.masterOn) {
+                                Text(
+                                    stringResource(R.string.status_master_off),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    if (!status.masterOn) {
+                                        App.instance.repository.set(Catalog.KEY_MASTER, true)
+                                    }
+                                    EngineService.sync(context)
+                                    refreshMasterTile(context)
+                                },
+                            ) { Text(stringResource(R.string.status_start_engine)) }
+                        }
                     }
                 }
             }

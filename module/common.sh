@@ -214,6 +214,9 @@ rfx_active_lib() {
 # never mistaken for the factory.
 rfx_effect_pids() {
     [ -n "${RFX_EFFECT_PIDS:-}" ] && { echo "$RFX_EFFECT_PIDS"; return; }
+    # Empty is a valid result (audio not started yet). Without this flag every caller would
+    # rescan all of /proc, which made the post-mount stage slow enough to trip the boot watchdog.
+    [ "${RFX_EFFECT_SCANNED:-0}" = "1" ] && return
     _pids=
     for exe in /proc/[0-9]*/exe; do
         [ -L "$exe" ] || continue
@@ -225,6 +228,7 @@ rfx_effect_pids() {
         esac
     done
     RFX_EFFECT_PIDS="${_pids# }"
+    RFX_EFFECT_SCANNED=1
     echo "$RFX_EFFECT_PIDS"
 }
 
@@ -234,6 +238,8 @@ rfx_effect_pids() {
 # when no stock plug-in is mapped yet (fresh boot, or a factory whose config lists only us).
 rfx_effect_loader_pids() {
     [ -n "${RFX_LOADER_PIDS:-}" ] && { echo "$RFX_LOADER_PIDS"; return; }
+    # Empty is valid (no plug-in mapped yet); memoise it too.
+    [ "${RFX_LOADER_SCANNED:-0}" = "1" ] && return
     _pids=
     for maps in /proc/[0-9]*/maps; do
         [ -r "$maps" ] || continue
@@ -243,6 +249,7 @@ rfx_effect_loader_pids() {
         _pids="$_pids $pid"
     done
     RFX_LOADER_PIDS="${_pids# }"
+    RFX_LOADER_SCANNED=1
     echo "$RFX_LOADER_PIDS"
 }
 
@@ -319,12 +326,12 @@ rfx_lib_targets() {
     esac
 }
 
-# Partitions a legacy effect library may be loaded from. The audio HAL (Android 8+) lives in
-# the vendor linker namespace and can dlopen from /vendor or /odm; audioserver on older
-# releases loads from /system.
+# Partitions the legacy engine is installed to: /system only. Both the vendor audio HAL and the
+# system-namespace audioserver can dlopen /system/lib64/soundfx, but audioserver cannot load
+# /vendor/lib64/soundfx — its linker namespace rejects it, and the .conf loader's
+# checkLibraryPath() picks /vendor first. A vendor copy therefore must not exist (#17).
 rfx_lib_partitions() {
-    echo /vendor
-    [ "$(rfx_api)" -lt 26 ] && echo /system
+    echo /system
     true
 }
 
@@ -375,15 +382,38 @@ rfx_is_effective_config() {
     [ "$(readlink -f "$first" 2>/dev/null || echo "$first")" = "$1" ]
 }
 
-# Android 8+ normally loads effects in the vendor audio HAL, so /system copies are left alone:
-# framework processes that read them can't load vendor libraries anyway (Samsung's audioserver
-# logs "library not found" for them). The exception is a ROM with no readable vendor config at
-# all: the framework then falls back to /system/etc, which must carry the effect too.
+# True when the /system copy is the config the framework would parse. Decided from the boot
+# snapshot (taken before the module is mounted), not from the action's shell, where a vendor or
+# SKU config can be hidden by a mount namespace and /system then looks like the only copy.
+rfx_system_config_effective() {
+    name="${1##*/}"
+    [ -f "$RFX_STATE/config_sources" ] || return 1
+    while IFS='|' read -r src _; do
+        case "$src" in
+            /odm/*|/vendor/*)
+                [ "${src##*/}" = "$name" ] && return 1
+                ;;
+        esac
+    done < "$RFX_STATE/config_sources"
+    return 0
+}
+
+# The engine itself lives in /system now, but the /system *config* is still only patched when it
+# is the one the framework parses: a /system mount is visible to app-side native detectors and
+# the audioserver config loader cannot use a vendor library from it. When a vendor/SKU config
+# exists it already carries the effect.
 rfx_config_wanted() {
     case "$1" in
         /system/vendor/*) return 0 ;;
         /system/*)
-            [ "$(rfx_api)" -lt 26 ] || rfx_is_effective_config "$1"
+            if [ "$(rfx_api)" -lt 26 ]; then
+                return 0
+            fi
+            if [ -f "$RFX_STATE/config_sources" ]; then
+                rfx_system_config_effective "$1"
+            else
+                rfx_is_effective_config "$1"
+            fi
             return
             ;;
         *) return 0 ;;
@@ -498,7 +528,13 @@ rfx_patch_xml() {
         rm -f "$dst.tmp"
         return 1
     fi
-    mv -f "$dst.tmp" "$dst"
+    if [ -f "$dst" ]; then
+        # Preserve the inode: a live bind mount reads this file. `mv` would unlink it and the
+        # HAL would then see a missing config (#17).
+        if cat "$dst.tmp" > "$dst"; then rm -f "$dst.tmp"; else rm -f "$dst.tmp"; return 1; fi
+    else
+        mv -f "$dst.tmp" "$dst"
+    fi
     return 0
 }
 
@@ -541,7 +577,13 @@ rfx_patch_conf() {
         rm -f "$dst.tmp"
         return 1
     fi
-    mv -f "$dst.tmp" "$dst"
+    if [ -f "$dst" ]; then
+        # Preserve the inode: a live bind mount reads this file. `mv` would unlink it and the
+        # HAL would then see a missing config (#17).
+        if cat "$dst.tmp" > "$dst"; then rm -f "$dst.tmp"; else rm -f "$dst.tmp"; return 1; fi
+    else
+        mv -f "$dst.tmp" "$dst"
+    fi
     return 0
 }
 
@@ -564,14 +606,13 @@ rfx_stage_libraries() {
             rfx_log "missing engine build for $abi"
             continue
         fi
-        # Drop builds that do not belong here, including ones an older module version staged:
-        # the AIDL build must not be visible in /vendor (the factory would pick it first and
-        # the HAL's namespace would reject it), and the legacy build is not used from /system
-        # on Android 8+.
+        # Remove every stale copy (including older module versions): both the AIDL front-end and
+        # the legacy engine live in /system only. A /vendor legacy copy is chosen first by
+        # audioserver's .conf loader and then rejected by its linker namespace (#17).
         for d in "$MODDIR/system/vendor/$libdir/soundfx" "$MODDIR/system/$libdir/soundfx"; do
             [ -d "$d" ] || continue
             rm -f "$d"/libresonancefx_aidl*.so
-            [ "$(rfx_api)" -ge 26 ] && rm -f "$d/$RFX_LIB"
+            rm -f "$d/$RFX_LIB"
         done
 
         for part in $(rfx_lib_partitions_for "$RFX_LIB"); do
@@ -635,7 +676,9 @@ rfx_generate_configs() {
     for d in system vendor odm product system_ext; do
         [ -d "$MODDIR/$d" ] && find "$MODDIR/$d/" -type f -name 'audio_effects*' -exec rm -f {} \; 2>/dev/null
     done
-    rm -rf "$RFX_STAGE/cfg"
+    # Keep $RFX_STAGE/cfg: those files are the source of live bind mounts. Deleting them makes
+    # the HAL's mounts point at unlinked inodes (the config then "disappears", #17). Each target
+    # is overwritten in place below.
     mkdir -p "$RFX_STAGE/cfg"
 
     # Which engine build and entry shape each config family needs. The AIDL factory cannot load
@@ -682,20 +725,63 @@ rfx_generate_configs() {
 
 # ---- Verification & fallback ----------------------------------------------------------------
 
-rfx_lib_visible() {
-    # True when the process that loads effects (not just this shell) can reach the library.
-    ok=0
+# APEXes whose soundfx directory carries AIDL effect plug-ins. An APEX-hosted AIDL factory
+# resolves a relative library name in its own /apex/<name>/<libdir>/soundfx first, and that path
+# is permitted by its linker namespace even when /vendor is rejected. Not every APEX has a
+# soundfx directory; the stock plug-in names are the marker.
+rfx_aidl_apex_dirs() {
+    apex="${RFX_APEX_ROOT:-/apex}"
+    for d in "$apex"/*/lib64/soundfx "$apex"/*/lib/soundfx; do
+        [ -d "$d" ] || continue
+        ls "$d" 2>/dev/null | grep -qE "$RFX_AIDL_LIBS" || continue
+        echo "$d"
+    done | sort -u
+}
+
+# Every path the active build can legitimately live at, in the factory's search order.
+rfx_active_lib_paths() {
     name="$(rfx_active_lib)"
     case "$name" in
-        libresonancefx_aidl*) libdirs="$(rfx_primary_libdir)" ;;
-        *) libdirs="$(rfx_lib_targets | awk '{ print $1 }')" ;;
+        libresonancefx_aidl*)
+            for d in $(rfx_aidl_apex_dirs); do echo "$d/$name"; done
+            echo "/system/$(rfx_primary_libdir)/soundfx/$name"
+            ;;
+        *)
+            for libdir in $(rfx_lib_targets | awk '{ print $1 }'); do
+                for part in $(rfx_lib_partitions_for "$name"); do
+                    echo "$part/$libdir/soundfx/$name"
+                done
+            done
+            ;;
     esac
-    for libdir in $libdirs; do
-        for part in $(rfx_lib_partitions_for "$name"); do
-            rfx_factory_sees "$part/$libdir/soundfx/$name" || ok=1
-        done
+}
+
+# Directories to bind the staged engine over for a given build and libdir. AIDL gets the APEX
+# soundfx dirs (the APEX factory's first search path) plus /system; legacy gets /vendor.
+rfx_lib_bind_targets() {
+    active="$1"
+    libdir="$2"
+    case "$active" in
+        libresonancefx_aidl*)
+            for d in $(rfx_aidl_apex_dirs); do
+                case "$d" in */"$libdir"/soundfx) echo "$d" ;; esac
+            done
+            echo "/system/$libdir/soundfx"
+            ;;
+        *)
+            for part in $(rfx_lib_partitions_for "$active"); do
+                echo "$part/$libdir/soundfx"
+            done
+            ;;
+    esac
+}
+
+rfx_lib_visible() {
+    # True when at least one candidate is visible to the process that loads effects.
+    for f in $(rfx_active_lib_paths); do
+        rfx_factory_sees "$f" && return 0
     done
-    return $ok
+    return 1
 }
 
 # Bind-mounts a soundfx directory that also contains our library over the real one. Used when
@@ -707,31 +793,72 @@ rfx_bind_libraries() {
         case "$active" in
             libresonancefx_aidl*) [ "$libdir" = "$primary" ] || continue ;;
         esac
-        for part in $(rfx_lib_partitions_for "$active"); do
-            target="$part/$libdir/soundfx"
-            rfx_factory_sees "$target/$active" && continue
+        for target in $(rfx_lib_bind_targets "$active" "$libdir"); do
+            [ -z "${RFX_FORCE_BIND:-}" ] && rfx_factory_sees "$target/$active" && continue
             [ -d "$target" ] || continue
+            lib="$MODDIR/engine/$abi/$active"
+            if [ ! -f "$lib" ]; then
+                rfx_log "missing engine build $lib; not binding $target"
+                continue
+            fi
             stage="$RFX_STAGE/$(echo "$target" | sed 's|/|_|g')"
+            # Drop any previous mount before touching its source; deleting the upper/stage of a
+            # live mount exposes missing files to the HAL.
+            rfx_drain_mount "$target"
+            rm -rf "$stage"
+            mkdir -p "$stage/upper" "$stage/work"
+
+            # Preferred: an overlay. The stock libraries stay in the read-only lower layer, so
+            # there is no large copy at boot (copying /vendor/lib64/soundfx tripped the boot
+            # watchdog on the S24 in #17).
+            if cp -f "$lib" "$stage/upper/$active" 2>/dev/null; then
+                chmod 0644 "$stage/upper/$active"
+                chcon "$(rfx_lib_context "$target/")" "$stage/upper/$active" 2>/dev/null
+                chcon "$(rfx_context_of "$target")" "$stage/upper" 2>/dev/null
+                chmod 0755 "$stage" "$stage/upper"
+                if mount -t overlay overlay \
+                    -o "lowerdir=$target,upperdir=$stage/upper,workdir=$stage/work" "$target" 2>/dev/null; then
+                    rfx_log "overlay-mounted library dir $target"
+                    echo bind > "$RFX_STATE/lib_mode"
+                    if rfx_factory_sees "$target/$active"; then
+                        rfx_log "audio HAL sees $target/$active"
+                    else
+                        rfx_log "audio HAL CANNOT see $target/$active (mount not shared; reboot required)"
+                    fi
+                    continue
+                fi
+            fi
+
+            # Fallback for kernels without overlayfs: copy the stock libraries and bind. Never
+            # do this in post-mount (the copy can take minutes and trips the boot watchdog).
+            if [ "${RFX_NO_COPY:-0}" = "1" ]; then
+                rfx_log "overlay unavailable for $target; deferring the copy to the service stage"
+                rm -rf "$stage"
+                continue
+            fi
             rm -rf "$stage"
             mkdir -p "$stage"
-            # Copy every stock effect library and keep its exact SELinux label, otherwise the
-            # HAL would lose access to the vendor's own effects.
+            copyfail=0
             for f in "$target"/*; do
                 [ -f "$f" ] || continue
-                cp -f "$f" "$stage/"
+                cp -f "$f" "$stage/" || { copyfail=1; break; }
                 chmod 0644 "$stage/${f##*/}"
                 chcon "$(rfx_context_of "$f")" "$stage/${f##*/}" 2>/dev/null
             done
-            lib="$MODDIR/engine/$abi/$active"
-            if [ -f "$lib" ]; then
-                cp -f "$lib" "$stage/$active"
-                chmod 0644 "$stage/$active"
-                chcon "$(rfx_lib_context "$target/")" "$stage/$active" 2>/dev/null
+            if [ "$copyfail" = "1" ]; then
+                rfx_log "not binding $target (could not copy its stock libraries)"
+                rm -rf "$stage"
+                continue
             fi
+            cp -f "$lib" "$stage/$active" || {
+                rfx_log "cannot copy $lib; not binding $target"
+                rm -rf "$stage"
+                continue
+            }
+            chmod 0644 "$stage/$active"
+            chcon "$(rfx_lib_context "$target/")" "$stage/$active" 2>/dev/null
             chmod 0755 "$stage"
             chcon "$(rfx_context_of "$target")" "$stage" 2>/dev/null
-            # Drop every layer left by an earlier pass or an earlier module version, then bind.
-            rfx_drain_mount "$target"
             if mount --bind "$stage" "$target"; then
                 rfx_log "bind-mounted library dir $target"
                 echo bind > "$RFX_STATE/lib_mode"
@@ -786,17 +913,20 @@ rfx_refresh_bound_libraries() {
         case "$active" in
             libresonancefx_aidl*) [ "$libdir" = "$primary" ] || continue ;;
         esac
-        for part in $(rfx_lib_partitions_for "$active"); do
-            target="$part/$libdir/soundfx"
+        for target in $(rfx_lib_bind_targets "$active" "$libdir"); do
             stage="$RFX_STAGE/$(echo "$target" | sed 's|/|_|g')"
             lib="$MODDIR/engine/$abi/$active"
             [ -f "$lib" ] || continue
-            [ -f "$stage/$active" ] || continue
-            cmp -s "$lib" "$target/$active" && continue
-            cp -f "$lib" "$stage/.$active.new" &&
-                chmod 0644 "$stage/.$active.new" &&
-                chcon "$(rfx_lib_context "$target/")" "$stage/.$active.new" 2>/dev/null
-            mv -f "$stage/.$active.new" "$stage/$active" && rfx_log "refreshed engine in $target"
+            # The library lives in upper/ for an overlay mount and in the stage root for the
+            # copy+bind fallback.
+            for f in "$stage/upper/$active" "$stage/$active"; do
+                [ -f "$f" ] || continue
+                cmp -s "$lib" "$f" && continue
+                cp -f "$lib" "$f.new" &&
+                    chmod 0644 "$f.new" &&
+                    chcon "$(rfx_lib_context "$target/")" "$f.new" 2>/dev/null
+                mv -f "$f.new" "$f" && rfx_log "refreshed engine in $target"
+            done
         done
     done
 }
@@ -805,7 +935,9 @@ rfx_ensure_mounted() {
     rfx_refresh_bound_libraries
     if ! rfx_lib_visible; then
         rfx_log "library not visible after module mount, applying bind fallback"
-        rfx_bind_libraries
+        # Force the bind: the per-target visibility check can see the shell's view while the
+        # loader's namespace still does not, which is exactly the Samsung/APEX case.
+        RFX_FORCE_BIND=1 rfx_bind_libraries
     fi
     if [ "$(rfx_configs_missing)" -gt 0 ]; then
         rfx_log "configs not visible after module mount, applying bind fallback"
@@ -826,6 +958,7 @@ rfx_unmount_all() {
             libdir="${pair%%:*}"
             for part in /vendor /system; do rfx_drain_mount "$part/$libdir/soundfx"; done
         done
+        for d in $(rfx_aidl_apex_dirs); do rfx_drain_mount "$d"; done
     done
 }
 
@@ -836,15 +969,17 @@ rfx_restart_audio() {
     # crashing. Covers audioserver plus every HIDL/AIDL audio HAL, whatever the vendor named it.
     getprop | sed -n 's/^\[init\.svc\.\([^]]*\)\].*/\1/p' | while read -r svc; do
         case "$svc" in
-            audioserver|*audio*hal*|*hal*audio*|*audio-service*|*audio_service*)
+            audioserver|*audio*hal*|*hal*audio*|*audio-service*|*audio_service*|*effect*)
                 setprop ctl.restart "$svc"
                 rfx_log "restarted $svc"
                 ;;
         esac
     done
-    # The effect processes are new now; forget the cached pids.
+    # The effect processes are new now; forget the cached pids and the "already scanned" flags.
     RFX_EFFECT_PIDS=
     RFX_LOADER_PIDS=
+    RFX_EFFECT_SCANNED=0
+    RFX_LOADER_SCANNED=0
 }
 
 # The definitive check: did the audio HAL's effect factory actually register our UUID?
@@ -888,12 +1023,13 @@ rfx_diag_get() { # <field 1..4>
     cut -d'|' -f"$1" "$RFX_STATE/diagnosis"
 }
 
-# The path the active build is staged to on this device.
+# The path the active build is expected at: the first candidate the factory can see, else the
+# first candidate (the APEX soundfx directory for an APEX-hosted AIDL HAL).
 rfx_expected_lib_path() {
-    name="$(rfx_active_lib)"
-    libdir="$(rfx_primary_libdir)"
-    part="$(rfx_lib_partitions_for "$name" | head -n 1)"
-    echo "$part/$libdir/soundfx/$name"
+    for f in $(rfx_active_lib_paths); do
+        rfx_factory_sees "$f" && { echo "$f"; return; }
+    done
+    rfx_active_lib_paths | head -n 1
 }
 
 # Reads our entry out of a patched config as "<library>|<path>|<type>". Works on the XML of both
@@ -936,6 +1072,13 @@ rfx_resolve_library() {
             return 1
             ;;
     esac
+    # An APEX-hosted AIDL factory searches its own APEX soundfx directory first.
+    if [ "$(rfx_factory_mode)" = aidl ]; then
+        for d in $(rfx_aidl_apex_dirs); do
+            cand="$d/$p"
+            if rfx_factory_sees "$cand"; then echo "$cand"; return 0; fi
+        done
+    fi
     for libdir in $(rfx_lib_targets | awk '{ print $1 }'); do
         for part in /odm /vendor /system; do
             cand="$part/$libdir/soundfx/$p"
@@ -989,7 +1132,7 @@ rfx_factory_error_line() {
         logcat -d -b all 2>/dev/null
     } | grep -iE "resonancefx|$RFX_UUID|$RFX_LIB|audio_effects" 2>/dev/null |
         grep -iE "dlopen|namespace|cannot|failed|error|denied|not found|no such file|parse|invalid" |
-        grep -viE "already exist|Error querying effect descriptor|could not create effect|AudioFlinger could not create effect|audit|avc:|scontext=|tcontext=|permissive=" |
+        grep -viE "already exist|Error querying effect descriptor|could not create effect|AudioFlinger could not create effect|audit|avc:|scontext=|tcontext=|permissive=|ActivityManager|ActivityTaskManager|Freecess|Notification|PackageManager|WindowManager|SurfaceFlinger|InputDispatcher|Launcher|PACKAGES_|AirCmd|Shortcut|HoneySpace|SGM|VRI\[" |
         tail -n 1
 }
 
@@ -1015,7 +1158,11 @@ rfx_classify_error() {
         *"cannot locate symbol"*|*"undefined symbol"*) echo SYM ;;
         *"cannot open shared object file"*) echo DEP ;;
         *"Permission denied"*) echo SELINUX ;;
+        *"FILE_NOT_FOUND"*) echo NOFILE ;;
         *"Could not find library"*|*"can't find"*) echo MISSING ;;
+        *"dlopen failed: library"*"not found"*) echo MISSING ;;
+        *"could not get library"*) echo MISSING ;;
+        *" not exist"*) echo MISSING ;;
         *"Failed to parse"*|*"partially invalid"*) echo PARSE ;;
         "") echo NONE ;;
         *) echo OTHER ;;
@@ -1082,10 +1229,16 @@ rfx_diagnose() {
     # E03: the engine must be visible to the process that loads effects.
     if ! rfx_lib_visible; then
         expected="$(rfx_expected_lib_path)"
+        staged="$MODDIR/system/$(rfx_primary_libdir)/soundfx/$(rfx_active_lib)"
+        candidates="$(rfx_active_lib_paths | tr '\n' ' ')"
         if [ -e "$expected" ]; then
             rfx_diag E03 "The module is installed, but the audio HAL cannot see its files." \
-                "$expected exists here but not in the effect process (mount namespace not shared)." \
+                "$expected exists here but not in the effect process (mount namespace not shared). Candidates: $candidates" \
                 "Reboot; if it persists, set the root manager to the global mount namespace."
+        elif [ -e "$staged" ]; then
+            rfx_diag E03 "The engine is staged but not exposed to the audio HAL." \
+                "Module copy: $staged; expected: $expected. The root manager did not mount the module's /system tree; the APEX bind fallback could not place the library. Candidates: $candidates" \
+                "Reboot; if it persists, send the logs. The library must land in the effect HAL's APEX soundfx directory or /system/lib64/soundfx."
         else
             rfx_diag E03 "The module did not stage the engine library." \
                 "Expected $expected; module directory: $MODDIR" \
@@ -1194,6 +1347,10 @@ rfx_diagnose() {
         ABI|SYM|DEP|SELINUX)
             rfx_diag E10 "The effect HAL cannot load the engine library ($kind)." "$err" \
                 "Send this log; the build or its dependencies do not match this HAL."
+            return ;;
+        NOFILE)
+            rfx_diag E06 "The config the effect HAL reads is missing." "$err" \
+                "Reboot; if it persists, reinstall the module. The Action must not delete a live bind source."
             return ;;
         PARSE)
             rfx_diag E11 "The effect HAL rejected the patched config." "$err" \

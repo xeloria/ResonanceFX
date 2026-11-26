@@ -233,6 +233,9 @@
     <string name="status_fact_convolver">コンボルバー</string>
     <string name="status_fact_diagnosis">診断</string>
     <string name="status_diagnosis_hint">コード %1$s — 正確な理由は root マネージャーのモジュールの「操作」で確認できます。</string>
+    <string name="status_diagnosis_app_hint">コード %1$s — アプリ側の状態です。下のボタンかマスタースイッチを確認してください。</string>
+    <string name="status_master_off">マスタースイッチがオフです。</string>
+    <string name="status_start_engine">エンジンを開始</string>
     <string name="status_fact_kernel_loaded">インパルス応答を読み込み済み</string>
     <string name="status_fact_no_kernel">インパルス応答なし</string>
     <string name="status_copy_report">レポートをコピー</string>

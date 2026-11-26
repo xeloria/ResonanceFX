@@ -38,4 +38,18 @@ for src in "$ROOT"/tests/fixtures/*; do
     fi
 done
 
+# Re-patching an existing destination must keep its inode: the module bind-mounts the staged
+# file, and mv would unlink a live bind's source (the config then disappears, #17).
+src="$ROOT/tests/fixtures/aosp_audio_effects.xml"
+dst="$SANDBOX/inplace.xml"
+$SHELL_CMD -c '. "$MODDIR/common.sh"; rfx_patch_any "$1" "$2"' _ "$src" "$dst"
+before="$(ls -i "$dst" | awk '{print $1}')"
+$SHELL_CMD -c '. "$MODDIR/common.sh"; rfx_patch_any "$1" "$2"' _ "$src" "$dst"
+after="$(ls -i "$dst" | awk '{print $1}')"
+if [ "$before" = "$after" ]; then
+    echo "PASS  in-place patch keeps the inode"
+else
+    echo "FAIL  in-place patch changed the inode ($before -> $after)"; fail=1
+fi
+
 exit $fail

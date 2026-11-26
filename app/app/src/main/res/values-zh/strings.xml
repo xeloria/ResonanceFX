@@ -233,6 +233,9 @@
     <string name="status_fact_convolver">卷积器</string>
     <string name="status_fact_diagnosis">诊断</string>
     <string name="status_diagnosis_hint">代码 %1$s — 在 root 管理器的模块“操作”中查看确切原因。</string>
+    <string name="status_diagnosis_app_hint">代码 %1$s — 应用侧状态；请使用下方按钮或检查主开关。</string>
+    <string name="status_master_off">主开关已关闭。</string>
+    <string name="status_start_engine">启动引擎</string>
     <string name="status_fact_kernel_loaded">已加载脉冲响应</string>
     <string name="status_fact_no_kernel">无脉冲响应</string>
     <string name="status_copy_report">复制报告</string>

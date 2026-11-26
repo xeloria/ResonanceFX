@@ -1,5 +1,39 @@
 # Changelog
 
+## v2.8.0
+
+Fixed:
+
+- **The legacy engine is installed in `/system/lib64/soundfx`, not `/vendor`.** The system-
+  namespace audioserver cannot `dlopen` `/vendor/lib64/soundfx`, and the legacy `.conf` loader
+  picks `/vendor` first and then has it rejected by the linker namespace. Both audioserver and
+  the vendor audio HAL can load `/system`, so the engine now loads in both. This is the root
+  cause of the S24 / OneUI 9 failure in #17.
+- **`/system` effect configs are only patched when they are the config the framework reads.**
+  The decision is made from the pre-mount snapshot, not from the Action's mount namespace, so an
+  Action can no longer create a late `/system/etc/audio_effects.xml` mount that audioserver
+  cannot use (and that native detectors can see). Vendor and SKU configs already carry the
+  effect.
+- **The Action no longer deletes live bind sources.** The config stage keeps its inodes: no
+  `rm -rf $RFX_STAGE/cfg`, and patchers overwrite in place instead of `mv`. A run can no longer
+  make `/vendor/etc/audio_effects_sec.xml` vanish with `XML_ERROR_FILE_NOT_FOUND`.
+- **Bootloops on Samsung / KernelSU Next.** `post-mount` applies overlay-only binds and memoises
+  empty process scans; the stock-library copy and any re-apply happen after `sys.boot_completed`,
+  so a slow operation cannot trip the boot watchdog.
+- **Diagnosis accuracy.** `FILE_NOT_FOUND` reports `E06`, `dlopen … not found` and
+  `could not get library` report `E09`, and framework noise (`AirCmd`, package lists) no longer
+  produces a bogus `E10`. The Action and app describe the actual candidate paths.
+
+Changed:
+
+- **App `E13` / `E12`:** app-side guidance instead of “open the module Action”. `E13` shows the
+  master-switch state and a **Start engine** button that turns the master on, starts
+  `EngineService` and refreshes the tile. The app trusts a factory registration it can see over
+  a stale module `E14`.
+- The copied status report includes `Master switch: true/false`.
+- Version 2.8.0 (20800). Engine DSP is unchanged; the measurements differ only in the reported
+  engine version.
+
 ## v2.7.0
 
 Added:

@@ -10,6 +10,10 @@ RFX_LOGFILE=/data/adb/resonancefx/logs/boot.log
 
 if rfx_in_recovery; then rfx_log "post-mount: recovery session, skipping"; exit 0; fi
 
-rfx_log "post-mount: verifying"
-rfx_ensure_mounted
+# Bind before audio starts so the HAL's mount namespace inherits the mounts (a bind made from
+# the action/service shell does not reach a HAL that init starts afterwards). The expensive
+# fallback copy is disabled here: post-mount must stay fast, or the boot watchdog reboots the
+# device (#17). If the overlay is unavailable, service.sh applies the copy after boot.
+rfx_log "post-mount: verifying (overlay only)"
+RFX_NO_COPY=1 rfx_ensure_mounted
 touch "$RFX_STATE/post_mount_ran"

@@ -78,11 +78,11 @@ check "aidl lib: exact match wins" libresonancefx_aidl_36.so \
 check "aidl lib: too-new build ignored" "" \
     "$(run "MODDIR='$SANDBOX/mod-multi'; RFX_TEST_API=34; $selector")"
 
-# The AIDL build must not be visible in /vendor: an APEX-hosted effect HAL permits /system/lib64
-# but not /vendor/lib64, and the AOSP factory picks /vendor first.
+# Both builds must be in /system only: audioserver (system linker namespace) cannot dlopen
+# /vendor/lib64/soundfx, and its .conf loader picks /vendor first if a copy exists (#17).
 check "aidl install partition" /system \
     "$(run "rfx_api() { echo 37; }; rfx_lib_partitions_for libresonancefx_aidl_36.so")"
-check "legacy install partition" /vendor \
+check "legacy install partition" /system \
     "$(run "rfx_api() { echo 37; }; rfx_lib_partitions_for libresonancefx.so")"
 
 stage="$SANDBOX/stage"
@@ -90,7 +90,9 @@ mkdir -p "$stage/engine/arm64-v8a"
 : > "$stage/engine/arm64-v8a/libresonancefx.so"
 : > "$stage/engine/arm64-v8a/libresonancefx_aidl_36.so"
 run "MODDIR='$stage'; rfx_lib_targets() { echo 'lib64 arm64-v8a'; }; rfx_api() { echo 37; }; rfx_stage_libraries" 2>/dev/null
-check "stage: legacy goes to vendor" 1 \
+check "stage: legacy goes to system" 1 \
+    "$([ -f "$stage/system/lib64/soundfx/libresonancefx.so" ] && echo 1 || echo 0)"
+check "stage: legacy not in vendor" 0 \
     "$([ -f "$stage/system/vendor/lib64/soundfx/libresonancefx.so" ] && echo 1 || echo 0)"
 check "stage: AIDL goes to system" 1 \
     "$([ -f "$stage/system/lib64/soundfx/libresonancefx_aidl_36.so" ] && echo 1 || echo 0)"
@@ -156,6 +158,17 @@ check "wanted: system config skipped when a vendor copy wins" 1 \
     "$(wanted 37 1 /system/etc/audio_effects.xml)"
 check "wanted: pre-Android 8 always patches system" 0 \
     "$(wanted 25 1 /system/etc/audio_effects.xml)"
+
+# The Action runs after mounting, where a vendor/SKU config can be hidden by a namespace. The
+# decision must come from the pre-mount snapshot, not from that view.
+mkdir -p "$SANDBOX/data/state"
+printf '/vendor/etc/audio_effects.xml|snap\n/system/etc/audio_effects.xml|snap2\n' > "$SANDBOX/data/state/config_sources"
+check "wanted: snapshot vendor copy hides system" 1 \
+    "$(run "rfx_api() { echo 37; }; rfx_config_wanted /system/etc/audio_effects.xml && echo 0 || echo 1")"
+printf '/system/etc/audio_effects.xml|snap\n' > "$SANDBOX/data/state/config_sources"
+check "wanted: snapshot with only system keeps it" 0 \
+    "$(run "rfx_api() { echo 37; }; rfx_config_wanted /system/etc/audio_effects.xml && echo 0 || echo 1")"
+: > "$SANDBOX/data/state/config_sources"
 
 # ---- regeneration after mounting ------------------------------------------------------------
 # rfx_generate_configs deletes the generated copies before rebuilding them. After the module is

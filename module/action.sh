@@ -21,15 +21,11 @@ if [ "$(cat /proc/1/comm 2>/dev/null)" != init ]; then
 fi
 say ""
 say "Engine libraries:"
-active="$(rfx_active_lib)"
-rfx_lib_targets | while read -r libdir abi; do
-    for part in $(rfx_lib_partitions); do
-        f="$part/$libdir/soundfx/$active"
-        if [ ! -d "$part/$libdir/soundfx" ]; then say "  n/a     $f (not used by this ROM)"
-        elif [ ! -f "$f" ]; then say "  MISSING $f"
-        elif rfx_factory_sees "$f"; then say "  OK      $f"
-        else say "  HIDDEN  $f (not visible to the audio HAL)"; fi
-    done
+for f in $(rfx_active_lib_paths); do
+    if rfx_factory_sees "$f"; then say "  OK      $f"
+    elif [ -e "$f" ]; then say "  HIDDEN  $f (exists, not visible to the audio HAL)"
+    elif [ -e "$MODDIR$f" ]; then say "  STAGED  $f (module copy is not mounted)"
+    else say "  MISSING $f"; fi
 done
 say ""
 say "Effect configurations:"
@@ -89,8 +85,7 @@ fix="$(rfx_diag_get 4)"
 [ -n "$fix" ] && say "Fix: $fix"
 say "Codes are explained in DIAGNOSTICS.md."
 
-# Recent effect-factory errors mentioning us, if any.
-logcat -d -b all 2>/dev/null | grep -iE "resonancefx|$RFX_UUID" | \
-    grep -iE "fail|error|cannot|could not|not found|denied|skipping|not exist" | \
-    grep -viE "audit|avc:|relabel|selinux|scontext=|tcontext=|permissive=" | \
-    tail -n 5 | while read -r l; do say "  log: $l"; done
+# The most recent effect-factory error about the engine, if any. Framework noise (activity
+# manager, freezer, notifications) is filtered out by rfx_factory_error_line.
+err="$(rfx_factory_error_line)"
+[ -n "$err" ] && say "  factory log: $err"

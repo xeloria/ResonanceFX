@@ -32,7 +32,7 @@ can inspect processes and logcat; the app is unprivileged and can only report wh
 | `E10` | The HAL found the library but cannot load it: linker namespace, CPU ABI, dependencies, symbols or SELinux. | Send the log line; it names the exact reason. |
 | `E11` | The HAL rejected the patched config. | Send the config and the logs. |
 | `E12` | *App:* the engine is registered but not attached to a stream. | Play audio, tap Re-apply, check the session error. |
-| `E13` | *App:* the engine service is not running. | Turn the master switch on, or reopen the app. |
+| `E13` | *App:* the engine service is not running. | Tap **Start engine** (turns the master switch on and starts the service) or reopen the app. |
 | `E14` | The module is installed and the config/library look correct, but the factory has not registered the engine. | Tap Action again or reboot; if it persists, send the logs. |
 | `E15` | The effect-HAL generation could not be determined (audio may still be starting). | Wait a few seconds and tap Action again. |
 | `E16` | The Action runs in a private PID namespace, so the module cannot see the audio processes. | Run Action from the root manager's own screen, or reboot. |
@@ -55,7 +55,11 @@ can inspect processes and logcat; the app is unprivileged and can only report wh
    and the path is resolved exactly like the factory does: relative names are searched in
    `/odm`, `/vendor` and `/system` `<libdir>/soundfx`, as seen through the loader's
    `/proc/<pid>/root` (not through the root shell's own view). Both `lib64` and `lib` are tried,
-   so a 32-bit HAL on a 64-bit device is not mistaken for a missing library.
+   so a 32-bit HAL on a 64-bit device is not mistaken for a missing library. The legacy engine
+   is installed in **`/system`**, not `/vendor`: audioserver runs in the system linker namespace
+   and cannot load `/vendor/lib64/soundfx`, while both audioserver and the vendor HAL can load
+   `/system`. The `.conf` loader's `checkLibraryPath()` also picks `/vendor` first, so a vendor
+   copy would be selected and then rejected.
 4. **The file itself** — ELF class and machine are checked against the directory it resolved
    from, not against the device's primary ABI.
 5. **Factory logs** — `dlopen`/namespace/parse errors are classified (`NS`, `ABI`, `SYM`, `DEP`,

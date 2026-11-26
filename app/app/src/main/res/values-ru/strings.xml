@@ -233,6 +233,9 @@
     <string name="status_fact_convolver">Свёрточный фильтр</string>
     <string name="status_fact_diagnosis">Диагностика</string>
     <string name="status_diagnosis_hint">Код %1$s — точную причину показывает действие модуля в менеджере root.</string>
+    <string name="status_diagnosis_app_hint">Код %1$s — состояние на стороне приложения; используйте кнопку ниже или проверьте главный переключатель.</string>
+    <string name="status_master_off">Главный переключатель выключен.</string>
+    <string name="status_start_engine">Запустить движок</string>
     <string name="status_fact_kernel_loaded">Импульсная характеристика загружена</string>
     <string name="status_fact_no_kernel">Нет импульсной характеристики</string>
     <string name="status_copy_report">Копировать отчёт</string>
