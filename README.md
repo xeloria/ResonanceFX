@@ -231,6 +231,9 @@ changes should come with before/after `tests/measure-engine.sh` output.
 GPL-3.0-or-later — see [`LICENSE`](LICENSE), [`NOTICE`](NOTICE) for third-party data
 attributions, and [`docs/LICENSING.md`](docs/LICENSING.md) for how the engine was written.
 
+**In one line:** use it, modify it, ship it — but share your source under the same license and
+keep the notices. The [plain-language guide](docs/LICENSING.md) explains the details.
+
 <div align="center">
 
 **Made with 🎧 by [Xeloria](https://github.com/xeloria)**
