@@ -41,7 +41,7 @@
     <string name="section_diff_title">差分环绕</string>
     <string name="section_diff_summary">哈斯效应的空间感</string>
     <string name="section_stereo_title">立体声拓宽</string>
-    <string name="section_stereo_summary">TBD</string>
+    <string name="section_stereo_summary">拓宽声像，中置保持不变。</string>
     <string name="section_vhe_title">耳机环绕+</string>
     <string name="section_vhe_summary">用于耳机的虚拟音箱</string>
     <string name="section_reverb_title">混响</string>

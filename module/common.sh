@@ -348,18 +348,24 @@ rfx_aidl_partition() {
     echo /system
 }
 
+# The executable behind a pid (overridable so the partition choice can be tested).
+rfx_pid_exe() { readlink "/proc/$1/exe" 2>/dev/null; }
+
 # Which partition hosts the effect factory? Only meaningful while the audio HAL is running.
-# Vendor processes win over system ones: a ROM may run both, but only a vendor-hosted HAL
-# needs the /vendor copy.
+# Ask the processes that actually load plug-ins first: a ROM can run a vendor audio HAL and a
+# system/APEX-hosted effect factory at the same time, and picking /vendor from the HAL alone
+# would strand the AIDL library where the factory cannot reach it (#17's lesson). Vendor
+# loaders still win over system ones, because only a vendor-hosted factory needs /vendor.
 rfx_detect_aidl_partition() {
-    _pids="$(rfx_effect_pids 2>/dev/null)"
+    _pids="$(rfx_effect_loader_pids 2>/dev/null)"
+    [ -n "$_pids" ] || _pids="$(rfx_effect_pids 2>/dev/null)"
     for _pid in $_pids; do
-        case "$(readlink "/proc/$_pid/exe" 2>/dev/null)" in
+        case "$(rfx_pid_exe "$_pid")" in
             /vendor/*) echo /vendor; return 0 ;;
         esac
     done
     for _pid in $_pids; do
-        case "$(readlink "/proc/$_pid/exe" 2>/dev/null)" in
+        case "$(rfx_pid_exe "$_pid")" in
             /system/*|/apex/*) echo /system; return 0 ;;
         esac
     done
@@ -634,9 +640,10 @@ rfx_stage_libraries() {
             rfx_log "missing engine build for $abi"
             continue
         fi
-        # Remove every stale copy (including older module versions): both the AIDL front-end and
-        # the legacy engine live in /system only. A /vendor legacy copy is chosen first by
-        # audioserver's .conf loader and then rejected by its linker namespace (#17).
+        # Remove every stale copy (including older module versions and a previous partition
+        # choice): the legacy engine lives in /system only, and exactly one AIDL copy may exist.
+        # A /vendor legacy copy is chosen first by audioserver's .conf loader and then rejected
+        # by its linker namespace (#17).
         for d in "$MODDIR/system/vendor/$libdir/soundfx" "$MODDIR/system/$libdir/soundfx"; do
             [ -d "$d" ] || continue
             rm -f "$d"/libresonancefx_aidl*.so
@@ -1016,13 +1023,28 @@ rfx_restart_audio() {
     RFX_LOADER_SCANNED=0
 }
 
+# True when a loader process has <name> mapped: proof the factory loaded it, not just that the
+# file is visible. Visibility alone is not a load (#17).
+rfx_lib_mapped() {
+    for _pid in $(rfx_effect_loader_pids); do
+        grep -q "$1" "/proc/$_pid/maps" 2>/dev/null && return 0
+    done
+    return 1
+}
+
 # The definitive check: did the audio HAL's effect factory actually register our UUID?
 # (audio_flinger dumps every effect library and descriptor it knows.)
 rfx_engine_registered() {
     dumpsys media.audio_flinger 2>/dev/null | grep -qi "$RFX_UUID" && return 0
-    # audio_flinger does not list device effects on every ROM (AIDL factories that are not
-    # connected to a chain show an empty list), so a mapped library is proof enough.
-    rfx_lib_visible
+    # audio_flinger does not list device effects on every ROM: an AIDL factory that is not
+    # attached to a chain shows an empty list. The AIDL front-end therefore also counts as
+    # registered when a loader process has it *mapped* — that is a load, not mere visibility.
+    # The legacy factory always lists what it loaded, so a legacy library that is only visible
+    # must stay unregistered (E14) rather than report a false OK (#17).
+    case "$(rfx_active_lib)" in
+        libresonancefx_aidl*) rfx_lib_mapped "$(rfx_active_lib)" ;;
+        *) return 1 ;;
+    esac
 }
 
 # ---- Diagnosis ------------------------------------------------------------------------------

@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.9.0
+
+Added:
+
+- **Stereo widening** — a new section, split out of Differential surround. It delays the *side*
+  signal symmetrically (1–20 ms), so the image widens around a centre that stays put
+  (inter-aural time difference ≈ 0). The side band is high-passed (80–250 Hz, 24 dB/oct) so bass
+  stays centred and mono-compatible, with dynamic mono protection. New feature bit
+  `kFeatureStereoWidener`; the app exposes delay and width.
+- **Inter-channel delay (ITD) measurements.** The Engine measurements page now shows the measured
+  per-band delay for effects that shift one channel in time, so a Haas/widener setting can be
+  checked against what the engine actually does.
+- **Vendor-hosted AIDL effect factories.** The AIDL front-end is staged in the partition its
+  factory can `dlopen`: `/vendor` for a vendor-hosted effect HAL, `/system` for a factory in
+  audioserver or an APEX. Exactly one copy exists; the choice is detected while the HAL is
+  running, kept in `$RFX_STATE/aidl_partition` for the early boot passes, and re-checked by
+  `service.sh` once the HAL is up (moving the library and restarting audio if it was wrong).
+- **SELinux policy for `hal_audio_default`** (`module/sepolicy.rule`): ashmem and the domain's own
+  files, which the AOSP-style AIDL FMQ/event-flag path needs and stock ROM policy never allowed
+  (stock effect libraries use the legacy ABI).
+
+Fixed:
+
+- **AIDL effect ABI/vtable layout in NDK builds.** The out-of-tree front-end now matches the
+  platform's vtable order (`engine/src/android/aidl/shim/android/binder_shell.h`), so an AIDL
+  factory no longer calls through a mismatched interface.
+- **Differential surround is the classic precedence effect again**: it delays the right channel
+  by 1–20 ms and is fully wet by default, as the original implementation was. The old width
+  multiplier is replaced by a **Mix** control (0–100 %) that softens the image shift and the mono
+  comb at the nulls; the side high-pass and mono-protection parameters are reserved.
+- **Registration is no longer reported from visibility alone.** An AIDL factory that is not
+  attached to a chain shows an empty `audio_flinger` list, so the AIDL build also counts as
+  registered when a loader process has it *mapped*. The legacy factory always lists what it
+  loaded, so a legacy library that is merely visible stays `E14` instead of a false `OK` (#17).
+- **Partition detection asks the plug-in loaders first.** A ROM can run a vendor audio HAL and a
+  system/APEX-hosted effect factory at the same time; deciding from any audio process could
+  strand the AIDL library in `/vendor` where the factory cannot reach it.
+- The Stereo widening section summary shipped as a `TBD` placeholder in all seven locales; it is
+  now written and translated.
+
+Changed:
+
+- Version 2.9.0 (20900). Measurements regenerated for the restored Haas delay and the new stereo
+  widener; the app's measurement strings and translations follow them.
+
 ## v2.8.0
 
 Fixed:

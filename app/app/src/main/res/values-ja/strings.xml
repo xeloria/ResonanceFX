@@ -41,7 +41,7 @@
     <string name="section_diff_title">ディファレンシャルサラウンド</string>
     <string name="section_diff_summary">Haas 効果による広がり。</string>
     <string name="section_stereo_title">Stereo widening</string>
-    <string name="section_stereo_summary">TBD</string>
+    <string name="section_stereo_summary">センターを保ったまま音像を広げます。</string>
     <string name="section_vhe_title">ヘッドホンサラウンド+</string>
     <string name="section_vhe_summary">ヘッドホン用のバーチャルスピーカー。</string>
     <string name="section_reverb_title">リバーブ</string>

@@ -25,9 +25,10 @@ real-time DSP engine, a universal Magisk / KernelSU / APatch module, and a moder
 
 ---
 
-> **🆕 What's new in 2.8.0** — the legacy engine now lives in `/system/lib64/soundfx`, where both
-> audioserver and the vendor audio HAL can load it; the Action can't delete a live config bind,
-> and `E13` gets a **Start engine** button. Full details in the [changelog](CHANGELOG.md).
+> **🆕 What's new in 2.9.0** — a new **Stereo widening** section (the centre stays put), the
+> classic Haas delay back with a **Mix** control, per-band **inter-channel delay** measurements,
+> and AIDL engines staged where a vendor-hosted effect factory can actually load them.
+> Full details in the [changelog](CHANGELOG.md).
 
 ## 💡 Why ResonanceFX?
 

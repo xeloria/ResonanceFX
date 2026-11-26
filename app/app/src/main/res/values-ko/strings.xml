@@ -41,7 +41,7 @@
     <string name="section_diff_title">디퍼런셜 서라운드</string>
     <string name="section_diff_summary">Haas 효과로 공간감을 줍니다.</string>
     <string name="section_stereo_title">Stereo widening</string>
-    <string name="section_stereo_summary">TBD</string>
+    <string name="section_stereo_summary">센터는 그대로 두고 음상을 넓힙니다.</string>
     <string name="section_vhe_title">헤드폰 서라운드+</string>
     <string name="section_vhe_summary">헤드폰용 가상 스피커.</string>
     <string name="section_reverb_title">리버브</string>

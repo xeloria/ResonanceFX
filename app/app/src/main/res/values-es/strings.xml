@@ -41,7 +41,7 @@
     <string name="section_diff_title">Surround diferencial</string>
     <string name="section_diff_summary">Amplitud por efecto Haas.</string>
     <string name="section_stereo_title">Stereo widening</string>
-    <string name="section_stereo_summary">TBD</string>
+    <string name="section_stereo_summary">Ensancha la imagen sin mover el centro.</string>
     <string name="section_vhe_title">Surround para auriculares+</string>
     <string name="section_vhe_summary">Altavoces virtuales para auriculares.</string>
     <string name="section_reverb_title">Reverberación</string>

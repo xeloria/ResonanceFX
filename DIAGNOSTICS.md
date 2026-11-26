@@ -59,12 +59,19 @@ can inspect processes and logcat; the app is unprivileged and can only report wh
    is installed in **`/system`**, not `/vendor`: audioserver runs in the system linker namespace
    and cannot load `/vendor/lib64/soundfx`, while both audioserver and the vendor HAL can load
    `/system`. The `.conf` loader's `checkLibraryPath()` also picks `/vendor` first, so a vendor
-   copy would be selected and then rejected.
+   copy would be selected and then rejected. The **AIDL** front-end is the opposite case: it is
+   staged in the partition its own factory can load — `/vendor` for a vendor-hosted effect HAL,
+   `/system` for a factory in audioserver or an APEX — and exactly one copy exists. The choice is
+   detected from the processes that map effect plug-ins (not from any audio process), kept in
+   `$RFX_STATE/aidl_partition`, and re-checked by `service.sh` once the HAL is up.
 4. **The file itself** — ELF class and machine are checked against the directory it resolved
    from, not against the device's primary ABI.
 5. **Factory logs** — `dlopen`/namespace/parse errors are classified (`NS`, `ABI`, `SYM`, `DEP`,
    `SELINUX`, `MISSING`, `PARSE`). These lines are saved to `logs/logcat.txt` by the boot stage.
-6. **Registration** — `dumpsys media.audio_flinger` must list the effect UUID.
+6. **Registration** — `dumpsys media.audio_flinger` must list the effect UUID. An AIDL factory
+   that is not attached to a chain can show an empty list, so the AIDL build also counts as
+   registered when a loader process has it **mapped**. The legacy factory always lists what it
+   loaded: a legacy library that is merely visible is *not* registered, and stays `E14`.
 
 ## Why a code can still be E14
 

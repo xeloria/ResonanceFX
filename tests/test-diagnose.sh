@@ -239,4 +239,29 @@ check "publish: format header" 1 \
 check "publish: body" "OK|Engine registered.|detail here|" \
     "$(tail -n 1 "$SANDBOX/appfiles/module-diagnosis.txt")"
 
+# Registration: a *visible* legacy library is not a load (#17). An AIDL library mapped in a
+# loader is, because audio_flinger may not list an AIDL factory that is not attached to a chain.
+printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/bin/dumpsys"
+chmod +x "$SANDBOX/bin/dumpsys"
+check "registered: legacy visible is not registered" 1 \
+    "$(run "rfx_active_lib() { echo libresonancefx.so; }; rfx_lib_visible() { return 0; }; rfx_lib_mapped() { return 0; }; rfx_engine_registered && echo 0 || echo 1")"
+check "registered: aidl mapped counts" 0 \
+    "$(run "rfx_active_lib() { echo libresonancefx_aidl_36.so; }; rfx_lib_mapped() { return 0; }; rfx_engine_registered && echo 0 || echo 1")"
+check "registered: aidl visible only does not count" 1 \
+    "$(run "rfx_active_lib() { echo libresonancefx_aidl_36.so; }; rfx_lib_visible() { return 0; }; rfx_lib_mapped() { return 1; }; rfx_engine_registered && echo 0 || echo 1")"
+
+# The AIDL partition comes from the processes that load plug-ins, not from any audio process:
+# a ROM can run a vendor HAL and a system/APEX effect factory at the same time.
+exe() { echo "rfx_pid_exe() { case \"\$1\" in $1 esac; }"; }
+check "aidl partition: vendor loader wins" /vendor \
+    "$(run "rfx_effect_loader_pids() { echo '11 12'; }; $(exe '11) echo /system/bin/audioserver ;; 12) echo /vendor/bin/hw/audiohalservice ;;'); rfx_detect_aidl_partition")"
+check "aidl partition: loaders beat an idle vendor HAL" /system \
+    "$(run "rfx_effect_loader_pids() { echo 11; }; rfx_effect_pids() { echo '11 12'; }; $(exe '11) echo /apex/com.android.audio/bin/audioserver ;; 12) echo /vendor/bin/hw/audiohalservice ;;'); rfx_detect_aidl_partition")"
+check "aidl partition: falls back to audio pids" /vendor \
+    "$(run "rfx_effect_loader_pids() { :; }; rfx_effect_pids() { echo 12; }; $(exe '*) echo /vendor/bin/hw/audiohalservice ;;'); rfx_detect_aidl_partition")"
+check "aidl partition: remembered choice" /vendor \
+    "$(run "echo /vendor > \"\$RFX_STATE/aidl_partition\"; rfx_aidl_partition")"
+check "aidl partition: default is system" /system \
+    "$(run "rm -f \"\$RFX_STATE/aidl_partition\"; rfx_aidl_partition")"
+
 exit $fail

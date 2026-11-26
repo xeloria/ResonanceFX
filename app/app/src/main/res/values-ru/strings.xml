@@ -41,7 +41,7 @@
     <string name="section_diff_title">Дифференциальный surround</string>
     <string name="section_diff_summary">Просторность по эффекту Хааса.</string>
     <string name="section_stereo_title">Stereo widening</string>
-    <string name="section_stereo_summary">TBD</string>
+    <string name="section_stereo_summary">Расширяет образ, не смещая центр.</string>
     <string name="section_vhe_title">Surround для наушников+</string>
     <string name="section_vhe_summary">Виртуальные колонки для наушников.</string>
     <string name="section_reverb_title">Реверберация</string>
