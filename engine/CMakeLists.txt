@@ -8,8 +8,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Driver version reported through the version getters.
-set(RFX_VERSION_CODE 20900 CACHE STRING "Driver version code")
-set(RFX_VERSION_NAME "2.9.0" CACHE STRING "Driver version name")
+set(RFX_VERSION_CODE 20901 CACHE STRING "Driver version code")
+set(RFX_VERSION_NAME "2.9.1" CACHE STRING "Driver version name")
 
 # Everything except the Android entry-point glue (the DSP core and the processors are shared by
 # both effect-library ABIs).

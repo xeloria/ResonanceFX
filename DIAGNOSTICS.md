@@ -55,19 +55,25 @@ can inspect processes and logcat; the app is unprivileged and can only report wh
    and the path is resolved exactly like the factory does: relative names are searched in
    `/odm`, `/vendor` and `/system` `<libdir>/soundfx`, as seen through the loader's
    `/proc/<pid>/root` (not through the root shell's own view). Both `lib64` and `lib` are tried,
-   so a 32-bit HAL on a 64-bit device is not mistaken for a missing library. The legacy engine
-   is installed in **`/system`**, not `/vendor`: audioserver runs in the system linker namespace
-   and cannot load `/vendor/lib64/soundfx`, while both audioserver and the vendor HAL can load
-   `/system`. The `.conf` loader's `checkLibraryPath()` also picks `/vendor` first, so a vendor
-   copy would be selected and then rejected. The **AIDL** front-end is the opposite case: it is
-   staged in the partition its own factory can load — `/vendor` for a vendor-hosted effect HAL,
-   `/system` for a factory in audioserver or an APEX — and exactly one copy exists. The choice is
-   detected from the processes that map effect plug-ins (not from any audio process), kept in
-   `$RFX_STATE/aidl_partition`, and re-checked by `service.sh` once the HAL is up.
+   so a 32-bit HAL on a 64-bit device is not mistaken for a missing library. **Placement is
+   evidence, not a fixed partition.** `checkLibraryPath()` re-resolves a bare library name to the
+   first existing copy in `/odm`, `/vendor`, `/system`, and the loader's linker namespace then
+   accepts or rejects it — so exactly one copy may exist, and it must be in a directory that
+   loader can load from. Samsung's audioserver maps its stock plug-ins from `/system` and cannot
+   `dlopen` `/vendor` (#17); a Motorola/MTK factory maps them from `/vendor` and cannot load
+   `/system` (#20). The module therefore reads the **stock effect libraries a loader process has
+   mapped** and installs the engine beside them, preferring audioserver over a vendor HAL because
+   its factory is the one app `AudioEffect`s reach. The choice is made at install, Action and late
+   boot, and stored in `$RFX_STATE/legacy_partition` / `$RFX_STATE/aidl_partition` for the early
+   boot passes. The **AIDL** front-end uses the same rule, with the host process's executable as
+   the fallback signal when no stock plug-in is mapped yet.
 4. **The file itself** — ELF class and machine are checked against the directory it resolved
    from, not against the device's primary ABI.
 5. **Factory logs** — `dlopen`/namespace/parse errors are classified (`NS`, `ABI`, `SYM`, `DEP`,
    `SELINUX`, `MISSING`, `PARSE`). These lines are saved to `logs/logcat.txt` by the boot stage.
+   App-side noise is excluded: our own process name appears in hidden-API reflection denials,
+   SELinux audits and vendor telemetry (`initMbrain failed`), none of which the factory logged.
+   Without that filter a working install reported a bogus `E10` (#20).
 6. **Registration** — `dumpsys media.audio_flinger` must list the effect UUID. An AIDL factory
    that is not attached to a chain can show an empty list, so the AIDL build also counts as
    registered when a loader process has it **mapped**. The legacy factory always lists what it

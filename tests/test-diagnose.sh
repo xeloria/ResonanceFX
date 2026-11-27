@@ -264,4 +264,21 @@ check "aidl partition: remembered choice" /vendor \
 check "aidl partition: default is system" /system \
     "$(run "rm -f \"\$RFX_STATE/aidl_partition\"; rfx_aidl_partition")"
 
+# App-side noise is not a factory error: our own process name shows up in hidden-API denials and
+# vendor telemetry ("initMbrain failed"), and a bogus E10 hid the real state on #20.
+mkdir -p "$SANDBOX/data/logs"
+printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/bin/logcat"
+chmod +x "$SANDBOX/bin/logcat"
+cat > "$SANDBOX/data/logs/logcat.txt" <<'EOF'
+11-27 05:20:24.333 13193 18786 D hub.resonancefx: initMbrain failed
+11-27 05:34:53.323 14437 14719 E hub.resonancefx: hiddenapi: Accessing hidden method Landroid/media/audiofx/AudioEffect;->getParameter([B[B)I (runtime_flags=0, domain=platform, api=blocked,test-api) from Lch; (domain=app, TargetSdkVersion=36) using reflection: denied
+EOF
+check "error line: app noise is not a factory error" "" "$(run "rfx_factory_error_line")"
+echo '11-27 05:35:01.000 3010 3010 E EffectsFactory: dlopen failed: library "/system/lib64/soundfx/libresonancefx.so" not found' >> "$SANDBOX/data/logs/logcat.txt"
+check "error line: a real load error is still found" 1 \
+    "$(run "rfx_factory_error_line | grep -c 'dlopen failed'")"
+check "error line: the real error classifies" MISSING \
+    "$(run "rfx_classify_error \"\$(rfx_factory_error_line)\"")"
+rm -f "$SANDBOX/data/logs/logcat.txt"
+
 exit $fail

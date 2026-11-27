@@ -326,12 +326,49 @@ rfx_lib_targets() {
     esac
 }
 
-# Partitions the legacy engine is installed to: /system only. Both the vendor audio HAL and the
-# system-namespace audioserver can dlopen /system/lib64/soundfx, but audioserver cannot load
-# /vendor/lib64/soundfx — its linker namespace rejects it, and the .conf loader's
-# checkLibraryPath() picks /vendor first. A vendor copy therefore must not exist (#17).
-rfx_lib_partitions() {
+# Partition the legacy engine is installed to. There is no single right answer: audioserver on
+# Samsung maps its stock plug-ins from /system and cannot dlopen /vendor (#17), while a
+# Motorola/MTK factory maps them from /vendor and cannot dlopen /system (#20). The choice is
+# detected from the running factory (rfx_detect_legacy_partition) and stored for the early boot
+# passes; /system is the AOSP default when nothing is mapped yet.
+rfx_legacy_partition() {
+    case "$(cat "$RFX_STATE/legacy_partition" 2>/dev/null)" in
+        /vendor|/system) cat "$RFX_STATE/legacy_partition"; return 0 ;;
+    esac
     echo /system
+}
+
+rfx_lib_partitions() {
+    rfx_legacy_partition
+    true
+}
+
+# First stock (non-ResonanceFX) effect library a process has mapped; empty when it has none.
+rfx_stock_soundfx_path() {
+    grep -oE '/[^ ]*/soundfx/[^ ]*\.so' "/proc/$1/maps" 2>/dev/null |
+        grep -v resonancefx | head -n 1
+}
+
+# The partition the legacy factory demonstrably loads plug-ins from: the one holding the stock
+# effect libraries a loader process has mapped. A library beside those is loadable by definition
+# — that process's linker namespace already permits the directory. This is evidence about the
+# ROM, not a guess from its name, so one rule serves both #17 and #20. audioserver is preferred
+# over a vendor HAL: its factory is the one app AudioEffects reach.
+rfx_detect_legacy_partition() {
+    _fallback=""
+    for _pid in $(rfx_effect_loader_pids); do
+        _stock="$(rfx_stock_soundfx_path "$_pid")"
+        case "$_stock" in
+            /vendor/*|/odm/*) _p=/vendor ;;
+            /system/*|/apex/*) _p=/system ;;
+            *) continue ;;
+        esac
+        case "$(rfx_pid_exe "$_pid")" in
+            */audioserver) echo "$_p"; return 0 ;;
+        esac
+        [ -n "$_fallback" ] || _fallback="$_p"
+    done
+    [ -n "$_fallback" ] && echo "$_fallback"
     true
 }
 
@@ -379,6 +416,24 @@ rfx_lib_partitions_for() {
         *) rfx_lib_partitions ;;
     esac
     true
+}
+
+# Refresh both placement choices from the running factory and store them for the early boot
+# passes. Returns 0 when either changed, so the caller knows to re-stage and re-apply. Only
+# meaningful while the audio HAL is up (install, Action, late boot).
+rfx_detect_partitions() {
+    _changed=0
+    _l="$(rfx_detect_legacy_partition)"
+    if [ -n "$_l" ] && [ "$_l" != "$(rfx_legacy_partition)" ]; then
+        echo "$_l" > "$RFX_STATE/legacy_partition"
+        _changed=1
+    fi
+    _a="$(rfx_detect_aidl_partition)"
+    if [ -n "$_a" ] && [ "$_a" != "$(rfx_aidl_partition)" ]; then
+        echo "$_a" > "$RFX_STATE/aidl_partition"
+        _changed=1
+    fi
+    [ "$_changed" = 1 ]
 }
 
 # Directories the framework searches for audio_effects*.xml, in order (system/media
@@ -641,9 +696,9 @@ rfx_stage_libraries() {
             continue
         fi
         # Remove every stale copy (including older module versions and a previous partition
-        # choice): the legacy engine lives in /system only, and exactly one AIDL copy may exist.
-        # A /vendor legacy copy is chosen first by audioserver's .conf loader and then rejected
-        # by its linker namespace (#17).
+        # choice): exactly one copy of each build may exist, in the partition its factory loads
+        # from. Two copies are worse than one wrong one — checkLibraryPath() picks /vendor first
+        # and a system-namespace loader then rejects it (#17).
         for d in "$MODDIR/system/vendor/$libdir/soundfx" "$MODDIR/system/$libdir/soundfx"; do
             [ -d "$d" ] || continue
             rm -f "$d"/libresonancefx_aidl*.so
@@ -1184,14 +1239,16 @@ rfx_expected_elf_abi_for() {
 
 # The most recent factory error that is about loading our library or parsing the config. The
 # "Error querying effect descriptor" lines are app requests that arrive when the factory does not
-# know the UUID yet; they are evidence for E14, not load errors.
+# know the UUID yet; they are evidence for E14, not load errors. App-side noise is excluded too:
+# our own process name appears in hidden-API denials, SELinux audits and vendor telemetry
+# ("initMbrain failed"), none of which the effect factory ever logged (#20).
 rfx_factory_error_line() {
     {
         [ -s "$RFX_LOGDIR/logcat.txt" ] && cat "$RFX_LOGDIR/logcat.txt"
         logcat -d -b all 2>/dev/null
     } | grep -iE "resonancefx|$RFX_UUID|$RFX_LIB|audio_effects" 2>/dev/null |
         grep -iE "dlopen|namespace|cannot|failed|error|denied|not found|no such file|parse|invalid" |
-        grep -viE "already exist|Error querying effect descriptor|could not create effect|AudioFlinger could not create effect|audit|avc:|scontext=|tcontext=|permissive=|ActivityManager|ActivityTaskManager|Freecess|Notification|PackageManager|WindowManager|SurfaceFlinger|InputDispatcher|Launcher|PACKAGES_|AirCmd|Shortcut|HoneySpace|SGM|VRI\[" |
+        grep -viE "already exist|Error querying effect descriptor|could not create effect|AudioFlinger could not create effect|audit|avc:|scontext=|tcontext=|permissive=|ActivityManager|ActivityTaskManager|Freecess|Notification|PackageManager|WindowManager|SurfaceFlinger|InputDispatcher|Launcher|PACKAGES_|AirCmd|Shortcut|HoneySpace|SGM|VRI\[|hiddenapi|reflection|initMbrain|Mbrain|DefaultDispatch|auditd|type=1400|AndroidRuntime|System\.err|RuntimeInit|app=io\.github\.resonancefx" |
         tail -n 1
 }
 

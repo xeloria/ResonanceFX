@@ -39,12 +39,16 @@ else
     rfx_unmount_all
 fi
 rm -rf "$RFX_STAGE" "$RFX_STATE/configs" "$RFX_STATE/config_sources" "$RFX_STATE/factory_used"
+# Where each build belongs is a property of the running factory, not of the device name: ask it
+# before staging, so the first boot already has the library in a loadable partition (#17, #20).
+rfx_detect_partitions
 rfx_stage_libraries
 
 rfx_print "- Detecting the effect factory"
 rfx_record_factory_mode
 FACTORY="$(rfx_factory_mode)"
 rfx_print "  + $FACTORY"
+rfx_print "  + engine placement: legacy=$(rfx_legacy_partition) aidl=$(rfx_aidl_partition)"
 if [ "$FACTORY" = aidl ] && [ -z "$(rfx_aidl_lib)" ]; then
     rfx_print "! [E07] This ROM uses the AIDL effect HAL and this build has no AIDL engine for API $API."
     rfx_print "! The effect engine will not load on this device."

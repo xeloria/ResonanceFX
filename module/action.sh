@@ -53,6 +53,10 @@ else say "  (none)"; fi
 say ""
 say "Repairing: re-patching configs and re-applying mounts..."
 rfx_record_factory_mode
+if rfx_detect_partitions; then
+    say "  engine placement: legacy=$(rfx_legacy_partition) aidl=$(rfx_aidl_partition)"
+    rfx_stage_libraries
+fi
 rfx_generate_configs
 rfx_ensure_mounted
 say "Restarting audio services..."

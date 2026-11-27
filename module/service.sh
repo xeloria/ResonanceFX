@@ -45,12 +45,11 @@ if [ "$live" != unknown ] && [ "$live" != "$used" ]; then
     rfx_ensure_mounted
     late_fix=1
 fi
-# The effect factory may be a vendor process or live in audioserver, and the AIDL library has
-# to be in a partition that process can dlopen. Re-check now that the HAL is up.
-detected="$(rfx_detect_aidl_partition)"
-if [ -n "$detected" ] && [ "$detected" != "$(rfx_aidl_partition)" ]; then
-    rfx_log "service: effect factory is $detected-hosted, moving the AIDL library"
-    echo "$detected" > "$RFX_STATE/aidl_partition"
+# The effect factory may be a vendor process or live in audioserver, and each engine build has
+# to be in a partition that process can dlopen. Re-check now that the HAL is up and its stock
+# plug-ins are mapped: that is the evidence for where ours belongs (#17, #20).
+if rfx_detect_partitions; then
+    rfx_log "service: factory placement is legacy=$(rfx_legacy_partition) aidl=$(rfx_aidl_partition), re-staging"
     rfx_stage_libraries
     rfx_ensure_mounted
     late_fix=1
@@ -72,7 +71,7 @@ logcat -d -b all 2>/dev/null | \
     tail -n 200 > "$RFX_LOGDIR/logcat.txt"
 # "already exist" is expected: vendors that load several config files see our effect more than
 # once and keep the first definition.
-errors="$(grep -iE "resonancefx|$RFX_UUID" "$RFX_LOGDIR/logcat.txt" | grep -iE "fail|error|cannot|could not|not found|denied|skipping|not exist|dlopen|namespace" | grep -viE "already exist|audit|avc:|relabel|selinux|scontext=|tcontext=|permissive=|ActivityManager|ActivityTaskManager|Freecess|Notification|PackageManager|WindowManager|SurfaceFlinger|InputDispatcher|Launcher|skipping freeze" | tail -n 1)"
+errors="$(grep -iE "resonancefx|$RFX_UUID" "$RFX_LOGDIR/logcat.txt" | grep -iE "fail|error|cannot|could not|not found|denied|skipping|not exist|dlopen|namespace" | grep -viE "already exist|audit|avc:|relabel|selinux|scontext=|tcontext=|permissive=|ActivityManager|ActivityTaskManager|Freecess|Notification|PackageManager|WindowManager|SurfaceFlinger|InputDispatcher|Launcher|skipping freeze|hiddenapi|reflection|initMbrain|Mbrain|DefaultDispatch|auditd|type=1400|AndroidRuntime|System\.err|RuntimeInit|app=io\.github\.resonancefx" | tail -n 1)"
 
 # The factory can register a little after sys.boot_completed; poll once instead of writing a
 # false failure into the module description.

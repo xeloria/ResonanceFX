@@ -85,10 +85,37 @@ check "aidl install partition" /system \
 check "legacy install partition" /system \
     "$(run "rfx_api() { echo 37; }; rfx_lib_partitions_for libresonancefx.so")"
 
+# The legacy partition is evidence, not a fixed choice: it is where the factory's *stock*
+# plug-ins are mapped. Samsung's audioserver maps /system (#17); a Motorola/MTK factory maps
+# /vendor (#20). One rule serves both, and no device name appears in it.
+mkdir -p "$SANDBOX/data/state"
+stock() { echo "rfx_stock_soundfx_path() { case \"\$1\" in $1 esac; }"; }
+pexe() { echo "rfx_pid_exe() { case \"\$1\" in $1 esac; }"; }
+check "legacy partition: default is system" /system \
+    "$(run "rm -f \"\$RFX_STATE/legacy_partition\"; rfx_lib_partitions")"
+check "legacy partition: stored choice is kept" /vendor \
+    "$(run "echo /vendor > \"\$RFX_STATE/legacy_partition\"; rfx_lib_partitions")"
+check "legacy detect: system audioserver beats a vendor HAL" /system \
+    "$(run "rfx_effect_loader_pids() { echo '11 12'; }; $(stock '11) echo /system/lib64/soundfx/libbundlewrapper.so ;; 12) echo /vendor/lib64/soundfx/libaudiopreprocessing.so ;;'); $(pexe '11) echo /system/bin/audioserver ;; 12) echo /vendor/bin/hw/android.hardware.audio.service ;;'); rfx_detect_legacy_partition")"
+check "legacy detect: audioserver mapping vendor plug-ins (MTK)" /vendor \
+    "$(run "rfx_effect_loader_pids() { echo 11; }; $(stock '11) echo /vendor/lib64/soundfx/libbundlewrapper.so ;;'); $(pexe '11) echo /system/bin/audioserver ;;'); rfx_detect_legacy_partition")"
+check "legacy detect: vendor-only loader" /vendor \
+    "$(run "rfx_effect_loader_pids() { echo 12; }; $(stock '12) echo /vendor/lib64/soundfx/libaudiopreprocessing.so ;;'); $(pexe '12) echo /vendor/bin/hw/audiohalservice ;;'); rfx_detect_legacy_partition")"
+check "legacy detect: nothing mapped is not a guess" "" \
+    "$(run "rfx_effect_loader_pids() { echo 11; }; rfx_stock_soundfx_path() { :; }; rfx_detect_legacy_partition")"
+check "detect_partitions: reports and stores a change" 0 \
+    "$(run "rm -f \"\$RFX_STATE/legacy_partition\" \"\$RFX_STATE/aidl_partition\"; rfx_effect_loader_pids() { echo 12; }; $(stock '12) echo /vendor/lib64/soundfx/libaudiopreprocessing.so ;;'); $(pexe '12) echo /vendor/bin/hw/audiohalservice ;;'); rfx_detect_partitions && echo 0 || echo 1")"
+check "detect_partitions: legacy stored" /vendor \
+    "$(run "cat \"\$RFX_STATE/legacy_partition\"")"
+check "detect_partitions: stable on the second run" 1 \
+    "$(run "rfx_effect_loader_pids() { echo 12; }; $(stock '12) echo /vendor/lib64/soundfx/libaudiopreprocessing.so ;;'); $(pexe '12) echo /vendor/bin/hw/audiohalservice ;;'); rfx_detect_partitions && echo 0 || echo 1")"
+
 stage="$SANDBOX/stage"
 mkdir -p "$stage/engine/arm64-v8a"
 : > "$stage/engine/arm64-v8a/libresonancefx.so"
 : > "$stage/engine/arm64-v8a/libresonancefx_aidl_36.so"
+# Staging follows the stored placement; start from the AOSP default for this case.
+rm -f "$SANDBOX/data/state/legacy_partition" "$SANDBOX/data/state/aidl_partition"
 run "MODDIR='$stage'; rfx_lib_targets() { echo 'lib64 arm64-v8a'; }; rfx_api() { echo 37; }; rfx_stage_libraries" 2>/dev/null
 check "stage: legacy goes to system" 1 \
     "$([ -f "$stage/system/lib64/soundfx/libresonancefx.so" ] && echo 1 || echo 0)"
@@ -98,6 +125,17 @@ check "stage: AIDL goes to system" 1 \
     "$([ -f "$stage/system/lib64/soundfx/libresonancefx_aidl_36.so" ] && echo 1 || echo 0)"
 check "stage: AIDL not in vendor" 0 \
     "$([ -f "$stage/system/vendor/lib64/soundfx/libresonancefx_aidl_36.so" ] && echo 1 || echo 0)"
+
+# A factory that loads its stock plug-ins from /vendor gets the engine there instead (#20), and
+# the previous /system copy is removed: two copies would let checkLibraryPath() pick the wrong one.
+run "echo /vendor > \"\$RFX_STATE/legacy_partition\"; echo /vendor > \"\$RFX_STATE/aidl_partition\"; MODDIR='$stage'; rfx_lib_targets() { echo 'lib64 arm64-v8a'; }; rfx_api() { echo 37; }; rfx_stage_libraries" 2>/dev/null
+check "stage: vendor choice goes to vendor" 1 \
+    "$([ -f "$stage/system/vendor/lib64/soundfx/libresonancefx.so" ] && echo 1 || echo 0)"
+check "stage: vendor choice leaves no system copy" 0 \
+    "$([ -f "$stage/system/lib64/soundfx/libresonancefx.so" ] && echo 1 || echo 0)"
+check "stage: vendor choice AIDL too" 1 \
+    "$([ -f "$stage/system/vendor/lib64/soundfx/libresonancefx_aidl_36.so" ] && echo 1 || echo 0)"
+rm -f "$SANDBOX/data/state/legacy_partition" "$SANDBOX/data/state/aidl_partition"
 
 # ---- entry shape ----------------------------------------------------------------------------
 

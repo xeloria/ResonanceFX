@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.9.1
+
+Fixed:
+
+- **The legacy engine is placed where the factory actually loads plug-ins from (#20).** 2.8.0
+  installed it in `/system` only, which fixed Samsung's audioserver (#17) but broke ROMs whose
+  effect factory loads its stock plug-ins from `/vendor` — a Motorola moto g86 5G on Android 16
+  registered with 2.7.0 (`/vendor`) and stopped registering with 2.8.0. There is no single right
+  partition: `checkLibraryPath()` re-resolves a bare library name to the first existing copy in
+  `/odm`, `/vendor`, `/system`, and the loader's linker namespace then accepts or rejects it.
+  The module now reads the **stock effect libraries a loader process has mapped** and installs
+  the engine beside them — a directory that process has already proven it can load from.
+  audioserver is preferred over a vendor HAL, because its factory is the one app `AudioEffect`s
+  reach. Exactly one copy exists; the choice is detected at install, Action and late boot, and
+  stored in `$RFX_STATE/legacy_partition` for the early boot passes. No device name is involved.
+- **App-side log noise is no longer reported as a factory error.** Our own process name appears
+  in hidden-API reflection denials (`hiddenapi: … getParameter … denied`), SELinux audits and
+  vendor telemetry (`initMbrain failed`); the error-line filter matched them and produced a bogus
+  `E10` even on a fully working install (visible in the #20 reporter's 2.7.0 report). Those
+  patterns are excluded now, in both the diagnosis and the boot log summary, so a working module
+  reports `OK` and a real failure reports its own line.
+
+Changed:
+
+- The install log and the Action print the chosen placement (`legacy=… aidl=…`), so the evidence
+  behind the choice is visible without reading the source.
+- Version 2.9.1 (20901). Engine DSP unchanged; measurements carry the new version.
+
 ## v2.9.0
 
 Added:

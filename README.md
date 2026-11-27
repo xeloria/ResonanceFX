@@ -25,9 +25,10 @@ real-time DSP engine, a universal Magisk / KernelSU / APatch module, and a moder
 
 ---
 
-> **🆕 What's new in 2.9.0** — a new **Stereo widening** section (the centre stays put), the
-> classic Haas delay back with a **Mix** control, per-band **inter-channel delay** measurements,
-> and AIDL engines staged where a vendor-hosted effect factory can actually load them.
+> **🆕 What's new in 2.9.1** — the engine is installed where your ROM's effect factory *already*
+> loads plug-ins from (fixes the Motorola/MTK regression in 2.8.0), and app-side log noise no
+> longer masquerades as a load error. Plus 2.9.0's **Stereo widening**, the classic Haas delay
+> with a **Mix** control, and per-band **inter-channel delay** measurements.
 > Full details in the [changelog](CHANGELOG.md).
 
 ## 💡 Why ResonanceFX?
